@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Cinco Corporation presents The Lecter · “Il Dottore” Calibre C-1991</title>
+<meta name="description" content="Cinco Corporation presents The Lecter: a hand-rendered luxury chronograph web app with complications, a harpsichord, a charcoal sketchbook and considerable manners.">
+<meta name="theme-color" content="#0c0b0a">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<canvas id="bg" aria-hidden="true"></canvas>
+<div id="app" class="app">
+  <header class="top">
+    <div class="brand">
+      <small><span class="sc">Cinco Corporation</span> <em>presents</em></small>
+      <h1>The Lecter <span>“Il Dottore” · Calibre C-1991</span></h1>
+    </div>
+    <nav class="top-actions" aria-label="Quick actions">
+      <button class="ico" data-act="theme" title="Change dial (T)" aria-label="Change dial"><svg viewBox="0 0 24 24"><path d="M12 3l8 6-8 12-8-12z"/></svg></button>
+      <button class="ico" data-act="moths" title="Moths (M)" aria-label="Toggle moths"><svg viewBox="0 0 24 24"><path d="M12 6v13M12 8c-3-4-8-4-9-1s3 6 9 5M12 8c3-4 8-4 9-1s-3 6-9 5M12 12c-2 2-5 4-6 6M12 12c2 2 5 4 6 6"/></svg></button>
+      <button class="ico" data-act="fullscreen" title="Fullscreen (F)" aria-label="Fullscreen"><svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
+      <button class="ico" data-act="help" title="Shortcuts (?)" aria-label="Keyboard shortcuts"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.3-1 .9-1 1.7M12 17h.01"/></svg></button>
+    </nav>
+  </header>
+  <main class="main">
+    <section class="stage" id="stage" aria-label="The watch">
+      <div class="bezel" id="bezel">
+        <div class="bezel-ring" id="bezel-ring"></div>
+        <div class="bezel-pointer" aria-hidden="true"></div>
+        <div class="watch-wrap" id="stage-watch">
+          <div class="watch3d" id="watch3d">
+            <div class="face front"><canvas id="watch" aria-label="Watch dial showing the current time"></canvas><canvas id="fog" aria-hidden="true"></canvas><canvas id="dialink" aria-hidden="true"></canvas></div>
+            <div class="face back"><canvas id="caseback" aria-label="Exhibition case back with the movement"></canvas></div>
+          </div>
+        </div>
+      </div>
+      <div class="under">
+        <button class="arrow" id="m-prev" aria-label="Previous complication">‹</button>
+        <div class="mode-name" id="mode-name"></div>
+        <button class="arrow" id="m-next" aria-label="Next complication">›</button>
+      </div>
+      <div class="dock">
+        <button data-act="flip" title="Turn the watch over (K)"><svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 0 1 14-5.3M20 12a8 8 0 0 1-14 5.3M18 3v4h-4M6 21v-4h4"/></svg><span>Turn over</span></button>
+        <button data-act="breathe" title="Breathe on the glass (B)"><svg viewBox="0 0 24 24"><path d="M4 14h11a3 3 0 1 0-3-3M4 10h6M4 18h9a2.5 2.5 0 1 1-2.5 2.5"/></svg><span>Breathe</span></button>
+        <button data-act="theme" title="Next dial (T)"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 4v16M4 12h16" opacity=".5"/></svg><span>Dial</span></button>
+        <button data-act="moths" title="Moths (M)"><svg viewBox="0 0 24 24"><path d="M12 6v13M12 8c-3-4-8-4-9-1s3 6 9 5M12 8c3-4 8-4 9-1s-3 6-9 5"/></svg><span>Moths</span></button>
+      </div>
+    </section>
+    <aside class="panel" id="panel">
+      <header class="p-head"><div class="kicker" id="p-kicker"></div><h2 id="p-title"></h2><p id="p-sub"></p></header>
+      <div class="panel-body" id="panel-body"></div>
+    </aside>
+  </main>
+  <nav class="mode-dock" id="mode-dock" aria-label="Complications"></nav>
+  <footer class="foot"><span>© 2026 <span class="sc">Cinco Corporation</span> · Maison d'Horlogerie</span><span>The Lecter “Il Dottore” C-1991 is a fictional product, and this is an affectionate homage. There is no affiliation with any film, studio or author.</span></footer>
+</div>
+<canvas id="moths" aria-hidden="true"></canvas>
+<div id="moth-tip" role="tooltip"><i>Acherontia styx</i> · death's-head hawkmoth</div>
+<canvas id="nv-grain" aria-hidden="true"></canvas><div class="nv-vignette" aria-hidden="true"></div>
+<div id="modal" role="dialog" aria-modal="true"><div id="modal-card" class="modal-card"></div></div>
+<div id="help" role="dialog" aria-label="Keyboard shortcuts"><div class="help-card"><button class="close x" aria-label="Close">×</button><div class="kicker">Regolazione</div><h2>Keyboard &amp; gestures</h2>
+  <div class="keys">
+    <div><kbd>←</kbd><kbd>→</kbd> or <kbd>[</kbd><kbd>]</kbd><span>Turn the bezel to the previous or next complication</span></div>
+    <div><kbd>1</kbd>–<kbd>9</kbd>, <kbd>0</kbd><span>Jump to complications 1 to 10</span></div>
+    <div><kbd>Space</kbd><span>Start or stop the chronograph. In Music it plays or pauses</span></div>
+    <div><kbd>L</kbd> / <kbd>R</kbd><span>Lap or reset (Chronograph)</span></div>
+    <div><kbd>T</kbd> / <kbd>Shift+T</kbd><span>Next or previous dial</span></div>
+    <div><kbd>K</kbd><span>Turn the watch over to see the case back and movement</span></div>
+    <div><kbd>B</kbd><span>Breathe on the glass, then wipe it with the cursor</span></div>
+    <div><kbd>M</kbd><span>Summon or dismiss the moths</span></div>
+    <div><kbd>P</kbd><span>Play or pause the harpsichord from anywhere</span></div>
+    <div><kbd>H</kbd><span>Switch between 12- and 24-hour time</span></div>
+    <div><kbd>F</kbd><span>Fullscreen</span></div>
+    <div><kbd>Y</kbd> / <kbd>N</kbd><span>Answer yes or no (Interrogation)</span></div>
+    <div><kbd>?</kbd> · <kbd>Esc</kbd><span>Show this card · close whatever is open</span></div>
+  </div>
+  <p class="fine">Mouse: the scroll wheel turns the bezel, the pushers at 2 and 4 o'clock run the chronograph, the crown moves to the next complication, and a double-click turns the watch over. Touch: swipe to change complication, long-press the crystal to breathe on it, and tilt the device to move the light and swing the rotor.</p></div></div>
+<div id="intro"></div>
+<div id="toast" role="status" aria-live="polite"></div>
+<script src="js/util.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/dial.js"></script>
+<script src="js/caseback.js"></script>
+<script src="js/effects.js"></script>
+<script src="js/modes-a.js"></script>
+<script src="js/menu.js"></script>
+<script src="js/parlour.js"></script>
+<script src="js/studio.js"></script>
+<script src="js/app.js"></script>
+<script>document.getElementById('intro').innerHTML = INTRO_HTML;</script>
+</body>
+</html>
