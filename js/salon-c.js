@@ -89,7 +89,8 @@ MODES.push({
   },
   show() { $$('#panel input[data-ch]').forEach(s => s.value = s.dataset.ch === 'harpsi' ? (Player.playing ? Settings.musicVol / 0.9 : 0) : Scape.levels[s.dataset.ch]); },
   frame() {
-    const cv = $('#am-cv'); if (!cv || !cv.clientWidth) return; const d = Math.min(devicePixelRatio || 1, 2), W = cv.clientWidth, H = cv.clientHeight; if (cv.width !== Math.round(W * d)) { cv.width = Math.round(W * d); cv.height = Math.round(H * d); }
+    const live = Scape.an && (Scape.any() || Player.playing); if (!live && this._still) return; this._still = !live;
+    const cv = $('#am-cv'); if (!cv || !cv.clientWidth) { this._still = false; return; } const d = Math.min(Perf.dpr(), 2), W = cv.clientWidth, H = cv.clientHeight; if (cv.width !== Math.round(W * d)) { cv.width = Math.round(W * d); cv.height = Math.round(H * d); }
     const x = cv.getContext('2d'); x.setTransform(d, 0, 0, d, 0, 0); x.clearRect(0, 0, W, H); x.fillStyle = 'rgba(0,0,0,.28)'; roundRect(x, 0, 0, W, H, 10); x.fill();
     x.strokeStyle = 'rgba(200,169,106,.12)'; x.beginPath(); x.moveTo(0, H / 2); x.lineTo(W, H / 2); x.stroke();
     const an = Scape.an; if (!an) { x.fillStyle = 'rgba(236,228,210,.4)'; x.font = 'italic 14px "Cormorant Garamond", serif'; x.textAlign = 'center'; x.fillText('Raise a slider to begin', W / 2, H / 2 - 8); return; }
@@ -97,7 +98,7 @@ MODES.push({
     const fb = this.fb || (this.fb = new Uint8Array(an.frequencyBinCount)); an.getByteFrequencyData(fb);
     for (let i = 0; i < 64; i++) { const v = fb[Math.floor(Math.pow(i / 64, 1.8) * fb.length * 0.7)] / 255; x.fillStyle = `rgba(179,32,42,${0.15 + v * 0.4})`; x.fillRect(i * W / 64 + 1, H - v * H * 0.9, W / 64 - 2, v * H * 0.9); }
     x.beginPath(); for (let i = 0; i < buf.length; i++) { const px = i / buf.length * W, py = H / 2 + (buf[i] - 128) / 128 * H * 1.4; i ? x.lineTo(px, py) : x.moveTo(px, py); }
-    x.strokeStyle = '#d8b36a'; x.lineWidth = 1.4; x.shadowColor = 'rgba(216,179,106,.6)'; x.shadowBlur = 6; x.stroke(); x.shadowBlur = 0;
+    x.strokeStyle = '#d8b36a'; x.lineWidth = 1.4; if (Perf.q.blur) { x.shadowColor = 'rgba(216,179,106,.6)'; x.shadowBlur = 6; } x.stroke(); x.shadowBlur = 0;
     Object.keys(Scape.CH).forEach(k => { const e = $('#am-lv-' + k); if (e) { const on = k === 'harpsi' ? Player.playing : Scape.levels[k] > 0; e.classList.toggle('on', on); } });
   }
 });

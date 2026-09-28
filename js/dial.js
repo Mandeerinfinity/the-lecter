@@ -65,13 +65,13 @@ const Watch = {
   init(canvas) { this.cv = canvas; this.ctx = canvas.getContext('2d'); this.setTheme(Settings.theme, true); this.resize(); },
   setTheme(id, silent) { this.theme = THEMES[id] || THEMES.florence; this.layers = {}; if (!silent) this.build(); },
   resize() {
-    const css = this.cv.clientWidth || 600; this.dpr = Math.min(window.devicePixelRatio || 1, 2.5);
+    const css = this.cv.clientWidth || 600; this.dpr = Perf.dpr();
     this.W = css; this.cv.width = Math.round(css * this.dpr); this.cv.height = Math.round(css * this.dpr);
-    this.R = css * 0.375; this.r = this.R * 0.80; this.build();
+    this.R = css * 0.375; this.r = this.R * 0.80; this.build(); this.lastSig = null;
   },
   geom() { return { cx: this.W / 2, cy: this.W / 2, R: this.R, r: this.r, W: this.W }; },
   mk() { const c = document.createElement('canvas'); c.width = this.cv.width; c.height = this.cv.height; const x = c.getContext('2d'); x.scale(this.dpr, this.dpr); x.translate(this.W / 2, this.W / 2); return [c, x]; },
-  build() { if (!this.W) return; this.layers = { inset: {} }; this.layers.metal = this.metal(); this.layers.variant = this.variant(); this.layers.case = this.buildCase(); this.layers.dial = this.buildDial(); },
+  build() { if (!this.W) return; this.layers = { inset: {} }; this.layers.metal = this.metal(); this.layers.variant = this.variant(); this.layers.case = this.buildCase(); this.layers.dial = this.buildDial(); this.lastSig = null; this.baseCache = null; },
 
   /* ——— static case ——— */
   buildCase() {
@@ -256,64 +256,122 @@ const Watch = {
   },
 
   /* ——— per-frame ——— */
-  render(now = new Date()) {
-    const ctx = this.ctx, R = this.R, r = this.r, T = this.theme;
+  /* ——— rendering ———
+     Everything that only depends on the light direction (case, bezel sheen, dial, moon, rehaut shadow, lume glow) is painted
+     into a cached "base" canvas keyed by a quantized light angle. Each frame then blits the base, draws the moving parts
+     (hands, pushers, tourbillon) and blits a cached crystal. Frames where nothing visible changed are skipped entirely:
+     between the eight beats a second the watch costs nothing. */
+  render(now = new Date(), dt = 1 / 60, force) {
     if (!this.layers.case || this.layers.metal !== this.metal() || this.layers.variant !== this.variant()) this.build();
-    let dl = ((this.lightTarget - this.light) % TAU + TAU * 1.5) % TAU - Math.PI; if (!this.hi) this.light += dl * 0.08;
-    ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, this.cv.width, this.cv.height);
-    ctx.drawImage(this.layers.case, 0, 0);
-    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0); ctx.translate(this.W / 2, this.W / 2);
-    const L = this.light, lx = Math.sin(L), ly = -Math.cos(L);
-    this.drawCrownPushers(ctx);
-    // dynamic case sheen
-    if (ctx.createConicGradient) {
-      ctx.save(); ctx.beginPath(); ctx.arc(0, 0, R, 0, TAU); ctx.arc(0, 0, R * 0.845, 0, TAU, true); ctx.clip('evenodd');
-      const g = ctx.createConicGradient(L - Math.PI / 2, 0, 0);
-      [[0, .5], [.08, 0], [.42, 0], [.5, .28], [.58, 0], [.92, 0], [1, .5]].forEach(([p, a]) => g.addColorStop(p, `rgba(255,255,255,${a})`));
-      ctx.globalCompositeOperation = 'soft-light'; ctx.fillStyle = g; ctx.fillRect(-R, -R, 2 * R, 2 * R); ctx.globalCompositeOperation = 'source-over'; ctx.restore();
-      this.drawSpecular(ctx, L);
+    if (this.hi) return this.paint(this.ctx, this.light, now, null);
+    const k = 1 - Math.exp(-dt * 5); let dl = ((this.lightTarget - this.light) % TAU + TAU * 1.5) % TAU - Math.PI; this.light += dl * k;
+    const steps = Perf.q.lightSteps, lq = Math.round(this.light / TAU * steps), L = lq / steps * TAU;
+    const decay = Math.pow(0.85, dt * 60); this.push.top *= decay; this.push.bot *= decay; this.repSlide *= Math.pow(0.93, dt * 60);
+    const st = this.state, tm = this.timing(now), ce = st.chrono.elapsed;
+    const tx = (typeof App !== 'undefined' ? Math.round(App.tiltY * 2) : 0), ty = (typeof App !== 'undefined' ? Math.round(App.tiltX * 2) : 0);
+    const sig = [lq, tm.key, (st.chrono.running || ce > 0) ? Math.floor(ce / 125) : -1, st.timer ? Math.round(st.timer.frac * 1500) : -1, st.session ? Math.round(st.session.frac * 1500) + (st.session.rest ? 'r' : 'f') : -1,
+      st.alarm ? st.alarm.h * 60 + st.alarm.m : -1, now.getDate(), Math.round(this.crownRot * 2), Math.round(this.push.top * 400), Math.round(this.push.bot * 400), Math.round(this.repSlide * 400),
+      Math.round(this.glow * 50), tx, ty, Settings.seconds, this.dirtyN || 0].join('|');
+    if (!force && !this.tourbAp && !this.secTween && sig === this.lastSig) return false;
+    this.lastSig = sig;
+    // base cache (small LRU so a light that swings back and forth reuses its frames)
+    const bkey = lq + '|' + Math.round(this.glow * 25) + '|' + (this.tourbAp ? 't' : Math.floor(moonPhase(now).frac * 400));
+    const cache = this.layers.base || (this.layers.base = new Map());
+    let base = cache.get(bkey);
+    if (!base) {
+      base = cache.size >= (Perf.mobile ? 3 : 6) ? (() => { const first = cache.keys().next().value, c = cache.get(first); cache.delete(first); return c; })() : null;
+      if (!base) { base = document.createElement('canvas'); base.width = this.cv.width; base.height = this.cv.height; }
+      this.paintBase(base.getContext('2d'), L, now); cache.set(bkey, base);
+    } else { cache.delete(bkey); cache.set(bkey, base); }
+    const ckey = lq + '|' + tx + '|' + ty; let cry = this.layers.cry;
+    if (!cry || this.layers.cryKey !== ckey) {
+      if (!cry) { cry = this.layers.cry = document.createElement('canvas'); cry.width = this.cv.width; cry.height = this.cv.height; }
+      const cx = cry.getContext('2d'); cx.setTransform(1, 0, 0, 1, 0, 0); cx.clearRect(0, 0, cry.width, cry.height); cx.setTransform(this.dpr, 0, 0, this.dpr, this.W / 2 * this.dpr, this.W / 2 * this.dpr);
+      this.drawCrystal(cx, Math.sin(L), -Math.cos(L), L); this.layers.cryKey = ckey;
     }
-    this.drawRepeaterSlide(ctx);
-    // under-dial: moon disc & aperture sky, or the tourbillon
-    if (this.tourbAp && typeof Tourbillon !== 'undefined') Tourbillon.draw(ctx, this.tourbAp.x, this.tourbAp.y, this.tourbAp.s, performance.now() / 1000, { mini: true, metal: this.M() });
-    else { const mp = moonPhase(now); this.drawMoon(ctx, mp); }
-    ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(this.layers.dial, 0, 0); ctx.restore();
-    this.drawInset(ctx, L);
-    // anisotropic dial sheen
-    if (ctx.createConicGradient && (T.pattern === 'sunburst' || T.pattern === 'grid' || T.pattern === 'wing' || T.pattern === 'clous')) {
-      ctx.save(); ctx.beginPath(); ctx.arc(0, 0, r, 0, TAU); ctx.clip();
-      const g = ctx.createConicGradient(L - Math.PI / 2, 0, 0), s = T.pattern === 'sunburst' ? 0.22 : 0.1;
-      [[0, s], [.1, 0], [.4, 0], [.5, s * 0.8], [.6, 0], [.9, 0], [1, s]].forEach(([p, a]) => g.addColorStop(p, `rgba(255,255,255,${a})`));
-      ctx.globalCompositeOperation = 'soft-light'; ctx.fillStyle = g; ctx.fillRect(-r, -r, 2 * r, 2 * r); ctx.restore();
-    }
-    // complications
-    const st = this.state, ms = now.getMilliseconds(), sec = now.getSeconds() + ms / 1000;
+    this.paint(this.ctx, L, now, { base, cry, tm });
+    return true;
+  },
+  /* beat timing: 28,800 vph, every beat eased with a tiny overshoot; the key changes only when the hands visibly move */
+  timing(now) {
+    const ms = now.getMilliseconds(), sec = now.getSeconds() + ms / 1000;
     const bps = Settings.seconds === 'tick' ? 1 : 8, bf = sec * bps, bi = Math.floor(bf), fr = bf - bi, win = bps === 1 ? 0.09 : 0.3;
-    const eb = (u) => { const c1 = 1.9, c3 = c1 + 1; return 1 + c3 * Math.pow(u - 1, 3) + c1 * Math.pow(u - 1, 2); }; // ease-out-back: a tiny overshoot on every beat
-    const beat = (bi - 1 + (fr < win ? eb(fr / win) : 1)) / bps; // 28,800 vph, each beat eased
+    const eb = (u) => { const c1 = 1.9, c3 = c1 + 1; return 1 + c3 * Math.pow(u - 1, 3) + c1 * Math.pow(u - 1, 2); };
+    const inEase = fr < win, beat = (bi - 1 + (inEase ? eb(fr / win) : 1)) / bps;
+    return { beat, key: now.getMinutes() * 1000 + bi * 40 + (inEase ? Math.round(fr / win * 30) : 31) };
+  },
+  paintBase(x, L, now) {
+    const R = this.R, r = this.r, T = this.theme;
+    x.setTransform(1, 0, 0, 1, 0, 0); x.clearRect(0, 0, x.canvas.width, x.canvas.height); x.drawImage(this.layers.case, 0, 0);
+    x.setTransform(this.dpr, 0, 0, this.dpr, this.W / 2 * this.dpr, this.W / 2 * this.dpr);
+    if (x.createConicGradient) {
+      x.save(); x.beginPath(); x.arc(0, 0, R, 0, TAU); x.arc(0, 0, R * 0.845, 0, TAU, true); x.clip('evenodd');
+      const g = x.createConicGradient(L - Math.PI / 2, 0, 0);
+      [[0, .5], [.08, 0], [.42, 0], [.5, .28], [.58, 0], [.92, 0], [1, .5]].forEach(([p, a]) => g.addColorStop(p, `rgba(255,255,255,${a})`));
+      x.globalCompositeOperation = 'soft-light'; x.fillStyle = g; x.fillRect(-R, -R, 2 * R, 2 * R); x.globalCompositeOperation = 'source-over'; x.restore();
+      this.drawSpecular(x, L);
+    }
+    if (!this.tourbAp) this.drawMoon(x, moonPhase(now));
+    x.save(); x.setTransform(1, 0, 0, 1, 0, 0); x.drawImage(this.layers.dial, 0, 0); x.restore();
+    this.drawInset(x, L);
+    if (x.createConicGradient && (T.pattern === 'sunburst' || T.pattern === 'grid' || T.pattern === 'wing' || T.pattern === 'clous' || T.pattern === 'lapis')) {
+      x.save(); x.beginPath(); x.arc(0, 0, r, 0, TAU); x.clip();
+      const g = x.createConicGradient(L - Math.PI / 2, 0, 0), s = T.pattern === 'sunburst' ? 0.24 : 0.11;
+      [[0, s], [.1, 0], [.4, 0], [.5, s * 0.8], [.6, 0], [.9, 0], [1, s]].forEach(([p, a]) => g.addColorStop(p, `rgba(255,255,255,${a})`));
+      x.globalCompositeOperation = 'soft-light'; x.fillStyle = g; x.fillRect(-r, -r, 2 * r, 2 * r); x.restore();
+    }
+    this.drawLumeGlow(x);
+    if (Settings.gmtOnDial) this.gmtTrack(x);
+  },
+  /* one frame. With caches (o.base / o.cry) it is a few blits plus the hands; without (hi-res renders) it paints everything. */
+  paint(ctx, L, now, o) {
+    const T = this.theme, st = this.state, tm = o ? o.tm : this.timing(now);
+    ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, this.cv.width, this.cv.height);
+    if (o) ctx.drawImage(o.base, 0, 0); else this.paintBase(ctx, L, now);
+    ctx.setTransform(this.dpr, 0, 0, this.dpr, this.W / 2 * this.dpr, this.W / 2 * this.dpr);
+    const Lsave = this.light; this.light = L;
+    this.drawCrownPushers(ctx); this.drawRepeaterSlide(ctx);
+    if (this.tourbAp && typeof Tourbillon !== 'undefined') { const A = this.tourbAp; ctx.save(); ctx.beginPath(); ctx.arc(A.x, A.y, A.s - 0.4, 0, TAU); ctx.clip(); Tourbillon.draw(ctx, A.x, A.y, A.s, performance.now() / 1000, { mini: true, metal: this.M() }); ctx.restore(); }
     this.drawTimerArc(ctx, st.timer); this.drawTimerArc(ctx, st.session, true); this.drawAlarmMarker(ctx, st.alarm);
-    const { S9, S3, S6 } = this.sub;
+    const { S9, S3, S6 } = this.sub, beat = tm.beat;
     this.subHand(ctx, S9, beat / 60, T.print);
     const ce = st.chrono.elapsed, cmin = Math.floor(ce / 60000) % 30;
     this.subHand(ctx, S3, (cmin + (ce % 60000 > 59900 ? 1 : 0)) / 30, T.accent);
     if (!this.tourbAp) this.subHand(ctx, S6, (now.getDate() - 1) / 31, T.numerals === 'painted' ? '#8a1e1e' : T.accent, 0.84, true);
-    this.drawLumeGlow(ctx);
-    // main hands
-    const mins = now.getMinutes() + sec / 60, hrs = (now.getHours() % 12) + mins / 60;
+    if (!this.tourbAp && typeof Ricorrenze !== 'undefined') Ricorrenze.drawDial(ctx, S6, now);
+    if (Settings.gmtOnDial) this.gmtHand(ctx, now);
+    const r = this.r, mins = now.getMinutes() + ((beat % 60) + 60) % 60 / 60 + (beat < 0 ? -1 / 60 : 0), hrs = (now.getHours() % 12) + mins / 60;
     this.dauphine(ctx, hrs / 12 * TAU, r * 0.56, r * 0.052, 3);
     this.dauphine(ctx, mins / 60 * TAU, r * 0.86, r * 0.042, 4);
     const chronoShown = st.chrono.running || ce > 0 || Settings.seconds === 'chrono';
     let secAng = chronoShown ? (Math.floor((ce % 60000) / 125) * 125 / 60000) * TAU : (((beat % 60) + 60) % 60 / 60) * TAU;
-    // flyback: when the chronograph resets, the hand sweeps back instead of teleporting
     const src = chronoShown ? 'c' : 's', pn = performance.now();
-    if (this.secSrc && this.secSrc !== src && this.secDisp != null && !this.hi) this.secTween = { from: this.secDisp, t0: pn };
-    if (this.secSrc === 'c' && src === 'c' && this.secDisp != null && secAng < this.secDisp - 0.3 && ce < 400 && !this.hi) this.secTween = { from: this.secDisp, t0: pn };
-    this.secSrc = src;
-    if (this.secTween) { const u = clamp((pn - this.secTween.t0) / 420, 0, 1), e = 1 - Math.pow(1 - u, 3); secAng = lerp(this.secTween.from, secAng, e); if (u >= 1) this.secTween = null; }
-    this.secDisp = secAng;
+    if (!this.hi) {
+      if (this.secSrc && this.secSrc !== src && this.secDisp != null) this.secTween = { from: this.secDisp, t0: pn };
+      if (this.secSrc === 'c' && src === 'c' && this.secDisp != null && secAng < this.secDisp - 0.3 && ce < 400) this.secTween = { from: this.secDisp, t0: pn };
+      this.secSrc = src;
+      if (this.secTween) { const u = clamp((pn - this.secTween.t0) / 420, 0, 1), e = 1 - Math.pow(1 - u, 3); secAng = lerp(this.secTween.from, secAng, e); if (u >= 1) this.secTween = null; }
+      this.secDisp = secAng;
+    }
     this.secondsHand(ctx, secAng);
-    this.drawCrystal(ctx, lx, ly);
+    if (o) { ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(o.cry, 0, 0); } else this.drawCrystal(ctx, Math.sin(L), -Math.cos(L), L);
+    this.light = Lsave;
   },
+  /* v3 GMT: a slim red 24-hour hand with an arrow tip, read against a small 24-hour track */
+  gmtHand(ctx, now) {
+    let zt; try { zt = zoneTime(Settings.gmtZone || 'UTC', now); } catch (e) { return; } const r = this.r, a = (zt.h + zt.m / 60) / 24 * TAU, T = this.theme;
+    ctx.save(); ctx.rotate(a); const sh = this.shade(ctx, 3, 1, 2, 0.4); ctx.strokeStyle = T.accent; ctx.lineWidth = r * 0.012; ctx.beginPath(); ctx.moveTo(0, r * 0.1); ctx.lineTo(0, -r * 0.78); ctx.stroke();
+    ctx.fillStyle = T.accent; ctx.beginPath(); ctx.moveTo(0, -r * 0.9); ctx.lineTo(-r * 0.04, -r * 0.76); ctx.lineTo(r * 0.04, -r * 0.76); ctx.closePath(); ctx.fill(); ctx.restore();
+  },
+  gmtTrack(x) {
+    const r = this.r, T = this.theme; x.save(); x.setTransform(this.dpr, 0, 0, this.dpr, this.W / 2 * this.dpr, this.W / 2 * this.dpr);
+    x.fillStyle = T.accent; x.globalAlpha = 0.85; x.font = `600 ${r * 0.052}px Georgia, serif`; x.textAlign = 'center'; x.textBaseline = 'middle';
+    for (let h = 2; h <= 24; h += 2) { const a = h / 24 * TAU; x.fillText(String(h), Math.sin(a) * r * 0.715, -Math.cos(a) * r * 0.715); }
+    x.restore();
+  },
+  /* shadows: a real blur on capable devices, an offset silhouette (almost free) otherwise */
+  shade(ctx, blur, ox, oy, alpha = 0.5) { if (Perf.q.blur || this.hi) { ctx.shadowColor = `rgba(0,0,0,${alpha})`; ctx.shadowBlur = blur; ctx.shadowOffsetX = ox; ctx.shadowOffsetY = oy; return null; } return { ox, oy, a: alpha * 0.55 }; },
+  fakeShadow(ctx, sh, pathFn) { if (!sh) return; ctx.save(); ctx.translate(sh.ox, sh.oy); ctx.fillStyle = `rgba(0,0,0,${sh.a})`; pathFn(); ctx.fill(); ctx.restore(); },
   drawCrownPushers(ctx) {
     const R = this.R, M = this.M();
     const cyl = (len, w, pressed, knurl) => {
@@ -329,7 +387,6 @@ const Watch = {
     ctx.save(); ctx.translate(R * 0.05, 0); cyl(R * 0.1, R * 0.2, 0, true); ctx.restore();
     ctx.save(); ctx.rotate(-Math.PI / 6); cyl(R * 0.1, R * 0.085, this.push.top * R * 0.03); ctx.restore();
     ctx.save(); ctx.rotate(Math.PI / 6); cyl(R * 0.1, R * 0.085, this.push.bot * R * 0.03); ctx.restore();
-    this.push.top *= 0.85; this.push.bot *= 0.85;
   },
   drawMoon(ctx, mp) {
     const A = this.moonAp, T = this.theme; if (!A) return;
@@ -349,42 +406,42 @@ const Watch = {
     ctx.restore(); ctx.restore();
   },
   subHand(ctx, S, frac, col, len = 0.82, thin = false) {
-    const a = frac * TAU; ctx.save(); ctx.translate(S.x, S.y); ctx.rotate(a);
-    ctx.shadowColor = 'rgba(0,0,0,.5)'; ctx.shadowBlur = 2; ctx.shadowOffsetX = -Math.sin(this.light) * 1.5; ctx.shadowOffsetY = Math.cos(this.light) * 1.5;
-    ctx.fillStyle = col; ctx.beginPath(); const w = S.s * (thin ? 0.025 : 0.04);
-    ctx.moveTo(-w, S.s * 0.2); ctx.lineTo(-w * 0.4, -S.s * len); ctx.lineTo(w * 0.4, -S.s * len); ctx.lineTo(w, S.s * 0.2); ctx.closePath(); ctx.fill();
-    if (thin) { ctx.beginPath(); ctx.moveTo(0, -S.s * len - S.s * 0.02); ctx.lineTo(-S.s * 0.05, -S.s * (len - 0.12)); ctx.lineTo(S.s * 0.05, -S.s * (len - 0.12)); ctx.closePath(); ctx.fill(); }
+    const a = frac * TAU, w = S.s * (thin ? 0.025 : 0.04), ox = -Math.sin(this.light) * 1.5, oy = Math.cos(this.light) * 1.5;
+    const path = () => { ctx.beginPath(); ctx.moveTo(-w, S.s * 0.2); ctx.lineTo(-w * 0.4, -S.s * len); ctx.lineTo(w * 0.4, -S.s * len); ctx.lineTo(w, S.s * 0.2); ctx.closePath();
+      if (thin) { ctx.moveTo(0, -S.s * len - S.s * 0.02); ctx.lineTo(-S.s * 0.05, -S.s * (len - 0.12)); ctx.lineTo(S.s * 0.05, -S.s * (len - 0.12)); ctx.closePath(); } };
+    ctx.save(); ctx.translate(S.x, S.y);
+    const sh = this.shade(ctx, 2, ox, oy); if (sh) { ctx.save(); ctx.translate(ox, oy); ctx.rotate(a); ctx.fillStyle = `rgba(0,0,0,${sh.a})`; path(); ctx.fill(); ctx.restore(); }
+    ctx.rotate(a); ctx.fillStyle = col; path(); ctx.fill();
     ctx.shadowColor = 'transparent'; ctx.beginPath(); ctx.arc(0, 0, S.s * 0.07, 0, TAU); const M = this.M(); const g = ctx.createRadialGradient(-1, -1, 0, 0, 0, S.s * 0.07); g.addColorStop(0, M[0]); g.addColorStop(1, M[2]); ctx.fillStyle = g; ctx.fill();
     ctx.restore();
   },
   dauphine(ctx, a, len, w, elev) {
-    const T = this.theme, L = this.light;
-    ctx.save(); ctx.rotate(a);
-    ctx.shadowColor = 'rgba(0,0,0,.5)'; ctx.shadowBlur = elev * 2.2; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 0;
-    // shadow offset in rotated frame
-    const sx = -Math.sin(L - a) * elev * 1.6, sy = Math.cos(L - a) * elev * 1.6; ctx.shadowOffsetX = sx * Math.cos(0); ctx.shadowOffsetY = sy;
-    const tail = len * 0.14;
+    const T = this.theme, L = this.light, tail = len * 0.14;
+    const outline = () => { ctx.beginPath(); ctx.moveTo(0, -len); ctx.lineTo(-w, -len * 0.18); ctx.lineTo(-w * 0.45, tail); ctx.lineTo(w * 0.45, tail); ctx.lineTo(w, -len * 0.18); ctx.closePath(); };
+    const ox = -Math.sin(L) * elev * 1.6, oy = Math.cos(L) * elev * 1.6;
+    ctx.save();
+    const sh = this.shade(ctx, elev * 2.2, ox, oy); if (sh) { ctx.save(); ctx.translate(ox, oy); ctx.rotate(a); ctx.fillStyle = `rgba(0,0,0,${sh.a})`; outline(); ctx.fill(); ctx.restore(); }
+    ctx.rotate(a);
     const bL = 0.5 + 0.5 * Math.cos(a - Math.PI / 2 - L), bR = 0.5 + 0.5 * Math.cos(a + Math.PI / 2 - L);
-    ctx.beginPath(); ctx.moveTo(0, -len); ctx.lineTo(-w, -len * 0.18); ctx.lineTo(-w * 0.45, tail); ctx.lineTo(w * 0.45, tail); ctx.lineTo(w, -len * 0.18); ctx.closePath();
-    ctx.fillStyle = T.hand[1]; ctx.fill(); ctx.shadowColor = 'transparent';
+    outline(); ctx.fillStyle = T.hand[1]; ctx.fill(); ctx.shadowColor = 'transparent';
     ctx.beginPath(); ctx.moveTo(0, -len); ctx.lineTo(-w, -len * 0.18); ctx.lineTo(-w * 0.45, tail); ctx.lineTo(0, tail); ctx.closePath(); ctx.fillStyle = mix(T.hand[1], T.hand[0], bL); ctx.fill();
     ctx.beginPath(); ctx.moveTo(0, -len); ctx.lineTo(w, -len * 0.18); ctx.lineTo(w * 0.45, tail); ctx.lineTo(0, tail); ctx.closePath(); ctx.fillStyle = mix(T.hand[1], T.hand[0], bR); ctx.fill();
+    // specular glint running along the facet that faces the light
+    const gl = Math.pow(Math.max(bL, bR), 6); if (gl > 0.05) { ctx.beginPath(); const sd = bL > bR ? -1 : 1; ctx.moveTo(0, -len * 0.97); ctx.lineTo(sd * w * 0.55, -len * 0.3); ctx.strokeStyle = `rgba(255,255,255,${(0.55 * gl).toFixed(3)})`; ctx.lineWidth = 0.9; ctx.stroke(); }
     ctx.beginPath(); ctx.moveTo(0, -len); ctx.lineTo(0, tail); ctx.strokeStyle = 'rgba(255,255,255,.35)'; ctx.lineWidth = 0.6; ctx.stroke();
     if (T.pattern !== 'enamel') { ctx.beginPath(); ctx.moveTo(0, -len * 0.9); ctx.lineTo(-w * 0.32, -len * 0.25); ctx.lineTo(0, -len * 0.2); ctx.lineTo(w * 0.32, -len * 0.25); ctx.closePath(); ctx.fillStyle = T.lume; ctx.globalAlpha = 0.85;
-      const gc = this.glowAmt(); if (gc > 0) { ctx.shadowColor = LUME_GLOW[Settings.theme] + (0.55 * gc).toFixed(3) + ')'; ctx.shadowBlur = this.r * 0.05 * gc; ctx.shadowOffsetX = ctx.shadowOffsetY = 0; }
+      const gc = this.glowAmt(); if (gc > 0 && (Perf.q.blur || this.hi)) { ctx.shadowColor = LUME_GLOW[Settings.theme] + (0.55 * gc).toFixed(3) + ')'; ctx.shadowBlur = this.r * 0.05 * gc; ctx.shadowOffsetX = ctx.shadowOffsetY = 0; }
       ctx.fill(); ctx.shadowColor = 'transparent'; ctx.globalAlpha = 1; }
     ctx.restore();
   },
   secondsHand(ctx, a) {
-    const r = this.r, T = this.theme, L = this.light, M = this.M();
-    ctx.save(); ctx.rotate(a);
-    ctx.shadowColor = 'rgba(0,0,0,.45)'; ctx.shadowBlur = 6; ctx.shadowOffsetX = -Math.sin(L - a) * 7; ctx.shadowOffsetY = Math.cos(L - a) * 7;
-    ctx.fillStyle = T.accent; ctx.beginPath(); ctx.moveTo(-r * 0.006, r * 0.18); ctx.lineTo(-r * 0.0035, -r * 0.96); ctx.lineTo(r * 0.0035, -r * 0.96); ctx.lineTo(r * 0.006, r * 0.18); ctx.closePath(); ctx.fill();
-    // moth-shaped counterweight
-    ctx.save(); ctx.translate(0, r * 0.19); const s = r * 0.05;
-    ctx.beginPath(); ctx.moveTo(0, -s * 0.9); ctx.bezierCurveTo(-s * 1.4, -s * 1.2, -s * 1.6, s * 0.1, -s * 0.2, s * 0.2); ctx.bezierCurveTo(-s * 0.9, s * 0.6, -s * 0.6, s * 1.1, 0, s * 0.5);
-    ctx.bezierCurveTo(s * 0.6, s * 1.1, s * 0.9, s * 0.6, s * 0.2, s * 0.2); ctx.bezierCurveTo(s * 1.6, s * 0.1, s * 1.4, -s * 1.2, 0, -s * 0.9); ctx.fill();
-    ctx.restore(); ctx.shadowColor = 'transparent';
+    const r = this.r, T = this.theme, L = this.light, M = this.M(), ox = -Math.sin(L) * 7, oy = Math.cos(L) * 7;
+    const body = () => { ctx.beginPath(); ctx.moveTo(-r * 0.006, r * 0.18); ctx.lineTo(-r * 0.0035, -r * 0.96); ctx.lineTo(r * 0.0035, -r * 0.96); ctx.lineTo(r * 0.006, r * 0.18); ctx.closePath();
+      const s = r * 0.05; ctx.moveTo(0, r * 0.19 - s * 0.9); ctx.bezierCurveTo(-s * 1.4, r * 0.19 - s * 1.2, -s * 1.6, r * 0.19 + s * 0.1, -s * 0.2, r * 0.19 + s * 0.2); ctx.bezierCurveTo(-s * 0.9, r * 0.19 + s * 0.6, -s * 0.6, r * 0.19 + s * 1.1, 0, r * 0.19 + s * 0.5);
+      ctx.bezierCurveTo(s * 0.6, r * 0.19 + s * 1.1, s * 0.9, r * 0.19 + s * 0.6, s * 0.2, r * 0.19 + s * 0.2); ctx.bezierCurveTo(s * 1.6, r * 0.19 + s * 0.1, s * 1.4, r * 0.19 - s * 1.2, 0, r * 0.19 - s * 0.9); ctx.closePath(); };
+    ctx.save();
+    const sh = this.shade(ctx, 6, ox, oy, 0.45); if (sh) { ctx.save(); ctx.translate(ox * 0.6, oy * 0.6); ctx.rotate(a); ctx.fillStyle = `rgba(0,0,0,${sh.a})`; body(); ctx.fill(); ctx.restore(); }
+    ctx.rotate(a); ctx.fillStyle = T.accent; body(); ctx.fill(); ctx.shadowColor = 'transparent';
     ctx.beginPath(); ctx.arc(0, -r * 0.8, r * 0.014, 0, TAU); ctx.fillStyle = T.lume; ctx.fill(); ctx.strokeStyle = T.accent; ctx.lineWidth = 1; ctx.stroke();
     ctx.restore();
     // centre stack
@@ -395,7 +452,7 @@ const Watch = {
     if (!t || !t.active) return; const r = this.r, rad = r * (session ? (this.state.timer ? 0.875 : 0.9) : 0.9), col = session ? (t.rest ? '#7fb7a0' : '#d8b36a') : this.theme.accent;
     ctx.save(); ctx.rotate(-Math.PI / 2); ctx.lineCap = 'round';
     ctx.beginPath(); ctx.arc(0, 0, rad, 0, TAU); ctx.strokeStyle = 'rgba(0,0,0,.25)'; ctx.lineWidth = r * 0.012; ctx.stroke();
-    ctx.shadowColor = col; ctx.shadowBlur = 8;
+    if (Perf.q.blur || this.hi) { ctx.shadowColor = col; ctx.shadowBlur = 8; }
     ctx.beginPath(); ctx.arc(0, 0, rad, 0, Math.max(0.001, t.frac) * TAU); ctx.strokeStyle = col; ctx.lineWidth = r * 0.012; ctx.stroke();
     ctx.restore();
   },
@@ -432,7 +489,7 @@ const Watch = {
     ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(c, 0, 0); ctx.restore();
   },
   drawRepeaterSlide(ctx) {
-    const R = this.R, M = this.M(), off = this.repSlide * 0.2; this.repSlide *= 0.93;
+    const R = this.R, M = this.M(), off = this.repSlide * 0.2;
     ctx.save(); ctx.rotate(Math.PI * 1.42 - off); // left flank, between eight and nine
     const g = ctx.createLinearGradient(0, -R * 1.04, 0, -R * 0.99); g.addColorStop(0, M[4]); g.addColorStop(0.35, M[0]); g.addColorStop(0.7, M[1]); g.addColorStop(1, M[2]);
     ctx.fillStyle = g; roundRect(ctx, -R * 0.075, -R * 1.035, R * 0.15, R * 0.05, R * 0.02); ctx.fill(); ctx.strokeStyle = 'rgba(0,0,0,.45)'; ctx.lineWidth = 0.8; ctx.stroke();
@@ -441,10 +498,10 @@ const Watch = {
   },
   drawAlarmMarker(ctx, al) {
     if (!al) return; const r = this.r, a = ((al.h % 12) + al.m / 60) / 12 * TAU;
-    ctx.save(); ctx.rotate(a); ctx.fillStyle = this.theme.accent; ctx.shadowColor = 'rgba(0,0,0,.5)'; ctx.shadowBlur = 3;
+    ctx.save(); ctx.rotate(a); ctx.fillStyle = this.theme.accent; if (Perf.q.blur) { ctx.shadowColor = 'rgba(0,0,0,.5)'; ctx.shadowBlur = 3; }
     ctx.beginPath(); ctx.moveTo(0, -r * 0.985); ctx.lineTo(-r * 0.028, -r * 1.035); ctx.lineTo(r * 0.028, -r * 1.035); ctx.closePath(); ctx.fill(); ctx.restore();
   },
-  drawCrystal(ctx, lx, ly) {
+  drawCrystal(ctx, lx, ly, Lc = this.light) {
     const R = this.R, r = this.r, cr = R * 0.845;
     ctx.save(); ctx.beginPath(); ctx.arc(0, 0, cr, 0, TAU); ctx.clip();
     const edge = ctx.createRadialGradient(0, 0, r * 0.9, 0, 0, cr); edge.addColorStop(0, 'rgba(0,0,0,0)'); edge.addColorStop(0.55, 'rgba(0,0,0,.18)'); edge.addColorStop(1, 'rgba(0,0,0,.45)');
@@ -452,23 +509,27 @@ const Watch = {
     const hx = lx * cr * 0.55, hy = ly * cr * 0.55, g = ctx.createRadialGradient(hx, hy, 0, hx, hy, cr * 0.95);
     g.addColorStop(0, 'rgba(255,255,255,.16)'); g.addColorStop(0.35, 'rgba(255,255,255,.05)'); g.addColorStop(1, 'rgba(255,255,255,0)');
     ctx.fillStyle = g; ctx.fillRect(-cr, -cr, cr * 2, cr * 2);
+    // hot spot: a tight, bright reflection of the key light on the dome, with a soft streak trailing across it
+    { const sx = lx * cr * 0.62, sy = ly * cr * 0.62, hs = ctx.createRadialGradient(sx, sy, 0, sx, sy, cr * 0.16); hs.addColorStop(0, 'rgba(255,255,255,.34)'); hs.addColorStop(0.25, 'rgba(255,255,255,.12)'); hs.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = hs; ctx.fillRect(sx - cr * 0.16, sy - cr * 0.16, cr * 0.32, cr * 0.32);
+      ctx.save(); ctx.translate(sx, sy); ctx.rotate(Lc + Math.PI / 2); ctx.scale(1, 0.18); ctx.beginPath(); ctx.arc(0, 0, cr * 0.3, 0, TAU); ctx.restore(); ctx.fillStyle = 'rgba(255,255,255,.05)'; ctx.fill(); }
     // crescent highlight
-    ctx.lineCap = 'round'; [[0.9, 0.012, .10], [0.55, 0.006, .28]].forEach(([sp, lw, al]) => { ctx.beginPath(); ctx.arc(0, 0, cr * 0.975, this.light - Math.PI / 2 - sp, this.light - Math.PI / 2 + sp); ctx.strokeStyle = `rgba(255,255,255,${al})`; ctx.lineWidth = cr * lw; ctx.stroke(); });
-    ctx.beginPath(); ctx.arc(0, 0, cr * 0.94, this.light + Math.PI / 2 - 0.5, this.light + Math.PI / 2 + 0.5); ctx.strokeStyle = 'rgba(120,150,255,.07)'; ctx.lineWidth = cr * 0.03; ctx.stroke();
+    ctx.lineCap = 'round'; [[0.9, 0.012, .10], [0.55, 0.006, .28]].forEach(([sp, lw, al]) => { ctx.beginPath(); ctx.arc(0, 0, cr * 0.975, Lc - Math.PI / 2 - sp, Lc - Math.PI / 2 + sp); ctx.strokeStyle = `rgba(255,255,255,${al})`; ctx.lineWidth = cr * lw; ctx.stroke(); });
+    ctx.beginPath(); ctx.arc(0, 0, cr * 0.94, Lc + Math.PI / 2 - 0.5, Lc + Math.PI / 2 + 0.5); ctx.strokeStyle = 'rgba(120,150,255,.07)'; ctx.lineWidth = cr * 0.03; ctx.stroke();
     // window-pane reflection band
-    ctx.save(); ctx.rotate(this.light + 0.7); const band = ctx.createLinearGradient(-cr, 0, cr, 0);
+    ctx.save(); ctx.rotate(Lc + 0.7); const band = ctx.createLinearGradient(-cr, 0, cr, 0);
     band.addColorStop(0.18, 'rgba(255,255,255,0)'); band.addColorStop(0.24, 'rgba(255,255,255,.045)'); band.addColorStop(0.33, 'rgba(255,255,255,.045)'); band.addColorStop(0.36, 'rgba(255,255,255,0)');
     ctx.fillStyle = band; ctx.fillRect(-cr, -cr, cr * 2, cr * 2); ctx.restore();
     // softbox reflected in the domed sapphire: two soft panes that drift with the light and tilt
     const tx = (typeof App !== 'undefined' ? App.tiltY : 0) * cr * 0.012, ty = (typeof App !== 'undefined' ? -App.tiltX : 0) * cr * 0.012;
-    ctx.save(); ctx.translate(lx * cr * 0.42 + tx, ly * cr * 0.42 + ty); ctx.rotate(this.light); ctx.fillStyle = 'rgba(255,255,255,.035)';
+    ctx.save(); ctx.translate(lx * cr * 0.42 + tx, ly * cr * 0.42 + ty); ctx.rotate(Lc); ctx.fillStyle = 'rgba(255,255,255,.035)';
     roundRect(ctx, -cr * 0.2, -cr * 0.12, cr * 0.17, cr * 0.26, cr * 0.03); ctx.fill(); roundRect(ctx, cr * 0.02, -cr * 0.12, cr * 0.17, cr * 0.26, cr * 0.03); ctx.fill(); ctx.restore();
     // anti-reflective coating: a faint violet-blue bloom opposite the light
     const ar = ctx.createRadialGradient(-lx * cr * 0.5, -ly * cr * 0.5, 0, -lx * cr * 0.5, -ly * cr * 0.5, cr * 0.9);
     ar.addColorStop(0, 'rgba(110,120,255,.06)'); ar.addColorStop(0.5, 'rgba(160,90,220,.025)'); ar.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = ar; ctx.fillRect(-cr, -cr, cr * 2, cr * 2);
     // refraction at the edge of the crystal: a dark thin ring and a bright caustic rim
     ctx.beginPath(); ctx.arc(0, 0, cr * 0.992, 0, TAU); ctx.strokeStyle = 'rgba(0,0,0,.45)'; ctx.lineWidth = cr * 0.012; ctx.stroke();
-    ctx.beginPath(); ctx.arc(0, 0, cr * 0.982, this.light + Math.PI / 2 - 0.7, this.light + Math.PI / 2 + 0.7); ctx.strokeStyle = 'rgba(255,255,255,.16)'; ctx.lineWidth = cr * 0.004; ctx.stroke();
+    ctx.beginPath(); ctx.arc(0, 0, cr * 0.982, Lc + Math.PI / 2 - 0.7, Lc + Math.PI / 2 + 0.7); ctx.strokeStyle = 'rgba(255,255,255,.16)'; ctx.lineWidth = cr * 0.004; ctx.stroke();
     ctx.restore();
   },
   /* Render the watch head off-screen at an arbitrary resolution (for product shots and icons). */
@@ -476,7 +537,7 @@ const Watch = {
     const keep = { cv: this.cv, ctx: this.ctx, W: this.W, dpr: this.dpr, R: this.R, r: this.r, layers: this.layers, sub: this.sub, moonAp: this.moonAp, tourbAp: this.tourbAp, secTween: this.secTween, secDisp: this.secDisp, secSrc: this.secSrc };
     const c = document.createElement('canvas'); c.width = c.height = px;
     Object.assign(this, { cv: c, ctx: c.getContext('2d'), W: 1000, dpr: px / 1000, R: 375, r: 300, hi: true, secTween: null });
-    try { this.build(); this.render(now); } finally { this.hi = false; Object.assign(this, keep); }
+    try { this.build(); this.render(now); } finally { this.hi = false; Object.assign(this, keep); this.lastSig = null; }
     return c;
   },
   snapshot(size = 900) {

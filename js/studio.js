@@ -92,7 +92,8 @@ MODES.push({
   mark() { $$('.pieces li').forEach(li => li.classList.toggle('on', li.dataset.id === this.sel)); },
   ui() { const b = $('#mu-play'); if (!b) return; b.textContent = Player.playing ? 'Pause' : 'Play'; $('#mu-now').innerHTML = Player.playing ? `Now playing: <em>${Player.piece.name}</em>, ${Player.piece.key}, variation ${Player.seed % 1000}` : 'Nothing playing. Choose a piece, or press <kbd>Space</kbd>.'; },
   frame() {
-    const cv = $('#mu-roll'); if (!cv) return; const d = Math.min(devicePixelRatio || 1, 2), W = cv.clientWidth, H = cv.clientHeight; if (!W) return; if (cv.width !== W * d) { cv.width = W * d; cv.height = H * d; }
+    if (!Player.playing && this._still) return; this._still = !Player.playing;
+    const cv = $('#mu-roll'); if (!cv) { this._still = false; return; } const d = Math.min(devicePixelRatio || 1, 2), W = cv.clientWidth, H = cv.clientHeight; if (!W) return; if (cv.width !== W * d) { cv.width = W * d; cv.height = H * d; }
     const x = cv.getContext('2d'); x.setTransform(d, 0, 0, d, 0, 0); x.clearRect(0, 0, W, H);
     const lo = 36, hi = 96, kH = H * 0.3, rollH = H - kH, now = Snd.ctx ? Snd.ctx.currentTime : 0, span = 4;
     const white = []; for (let m = lo; m <= hi; m++) if (![1, 3, 6, 8, 10].includes(m % 12)) white.push(m);
@@ -169,17 +170,24 @@ MODES.push({
   id: 'settings', name: 'Impostazioni', label: 'Settings', kicker: 'Regolazione', icon: 'settings', sub: 'Preferences are saved in this browser.',
   build(el) {
     const tg = (k, l) => `<label class="row-set"><span>${l}</span><label class="switch"><input type="checkbox" data-k="${k}" ${Settings[k] ? 'checked' : ''}><span></span></label></label>`;
-    el.innerHTML = `<div class="set-list">${tg('h24', '24-hour time')}${tg('moths', "Death's-head moths")}<label class="row-set"><span>Moth count</span><input type="range" id="st-mc" min="4" max="60" value="${Settings.mothCount}"></label>
+    el.innerHTML = `<label class="lbl">Performance</label><div class="seg" id="st-perf"><button data-v="auto">Auto</button><button data-v="smooth">Smooth</button><button data-v="beautiful">Beautiful</button></div>
+      <p class="fine" id="st-perf-note"></p>
+      <div class="set-list">${tg('fpsMeter', 'Show the frame-rate meter')}${tg('haptics', 'Haptic feedback (where supported)')}${tg('parallax', 'Parallax depth on tilt')}${tg('candle', 'Candlelight flicker')}${tg('autoTheme', 'Dark after sunset, light after sunrise')}</div>
+      <div class="set-list">${tg('h24', '24-hour time')}${tg('moths', "Death's-head moths")}<label class="row-set"><span>Moth count</span><input type="range" id="st-mc" min="4" max="60" value="${Settings.mothCount}"></label>
       ${tg('fog', 'Breath on the glass')}${tg('tick', 'Audible ticking')}${tg('hourlyChime', 'Hourly harpsichord chime')}${tg('lightFollow', 'Light follows cursor / tilt')}${tg('nvNoise', 'Night-vision grain')}${tg('lumeGlow', 'Lume glow in dark dials')}${tg('reducedMotion', 'Reduced motion')}
       ${tg('voice', 'Voice: speak the time (S) and remarks aloud')}${tg('voiceQuid', 'Voice also reads Quid pro quo')}
       <label class="row-set"><span>Master volume</span><input type="range" id="st-vol" min="0" max="1" step="0.01" value="${Settings.volume}"></label></div>
-      <div class="btn-row"><button class="btn" id="st-keys">Keyboard shortcuts</button><button class="btn" id="st-intro">Replay the introduction</button><button class="btn" id="st-voice">Test the voice</button><button class="btn" id="st-fs">Fullscreen</button><button class="btn ghost" id="st-reset">Reset everything</button></div>
+      <div class="btn-row"><button class="btn" id="st-keys">Keyboard shortcuts</button><button class="btn" id="st-intro">Replay the introduction</button><button class="btn" id="st-voice">Test the voice</button><button class="btn" id="st-fs">Fullscreen</button><button class="btn" id="st-compact">Compact view</button><button class="btn" id="st-motion" hidden>Enable tilt (iPhone)</button><button class="btn ghost" id="st-reset">Reset everything</button></div>
       <p class="fine" id="st-vname"></p><p class="fine">On phones and tablets: swipe left or right across the watch to change complication, long-press the crystal to breathe on it, and tilt the device to move the light.</p>`;
     $$('input[data-k]', el).forEach(c => c.onchange = () => { setSetting(c.dataset.k, c.checked); if (c.dataset.k === 'tick' || c.dataset.k === 'hourlyChime') Snd.ensure(); });
     $('#st-mc', el).oninput = (e) => setSetting('mothCount', +e.target.value);
+    const perfMark = () => { $$('#st-perf button', el).forEach(b => { const on = b.dataset.v === Settings.perf; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on); });
+      const n = $('#st-perf-note', el); if (n) n.textContent = { auto: 'Auto watches the frame rate and steps the detail down or up to stay smooth. Now: ', smooth: 'Smooth favours frame rate: fewer moths, no blur, lighter shadows. Now: ', beautiful: 'Beautiful renders at full resolution with every effect, even if the frame rate dips. Now: ' }[Settings.perf] + Perf.q.name + '.'; };
+    $$('#st-perf button', el).forEach(b => b.onclick = () => { setSetting('perf', b.dataset.v); perfMark(); });
+    Bus.on('quality', perfMark); perfMark();
     $('#st-vol', el).oninput = (e) => { setSetting('volume', +e.target.value); Snd.setVolume(+e.target.value); };
     $('#st-voice', el).onclick = () => { Voice.pick(); const ok = Voice.speak('Good evening. ' + Voice.phrase(), true); toast(ok ? 'Voice: ' + Voice.name() : 'Speech is not available in this browser'); };
-    $('#st-keys', el).onclick = () => App.help(); $('#st-intro', el).onclick = () => App.intro(true); $('#st-fs', el).onclick = () => App.fullscreen();
+    $('#st-keys', el).onclick = () => App.help(); $('#st-intro', el).onclick = () => App.intro(true); $('#st-fs', el).onclick = () => App.fullscreen(); $('#st-compact', el).onclick = () => Compact.set(true); const mb = $('#st-motion', el); mb.hidden = !Motion.needs(); mb.onclick = () => Motion.ask();
     $('#st-reset', el).onclick = () => { if (confirm('Reset all settings, alarms, laps and timers stored by this watch?')) { Object.keys(localStorage).filter(k => k.startsWith('lecter.')).forEach(k => localStorage.removeItem(k)); location.reload(); } };
     Bus.on('setting', (k, v) => { const c = $(`input[data-k="${k}"]`, el); if (c) c.checked = !!v; });
   },

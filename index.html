@@ -14,11 +14,11 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="The Lecter">
-<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/style.css?v=3.0.0">
 </head>
 <body>
 <a class="skip" href="#panel">Skip to the controls</a>
-<canvas id="bg" aria-hidden="true"></canvas>
+<canvas id="bg" aria-hidden="true"></canvas><div id="bg-dim" aria-hidden="true"></div><div id="candle" aria-hidden="true"></div>
 <div id="app" class="app">
   <header class="top">
     <div class="brand">
@@ -39,9 +39,10 @@
       <div class="bezel" id="bezel">
         <div class="bezel-ring" id="bezel-ring"></div>
         <div class="bezel-pointer" aria-hidden="true"></div>
+        <div class="w-shadow" aria-hidden="true"></div>
         <div class="watch-wrap" id="stage-watch">
           <div class="watch3d" id="watch3d">
-            <div class="face front"><canvas id="watch" role="img" aria-label="Watch dial showing the current time"></canvas><canvas id="fog" aria-hidden="true"></canvas><canvas id="dialink" aria-hidden="true"></canvas></div>
+            <div class="face front"><canvas id="watch" role="img" aria-label="Watch dial showing the current time"></canvas><canvas id="fog" aria-hidden="true"></canvas><canvas id="dialink" aria-hidden="true"></canvas><div id="glint" aria-hidden="true"></div></div>
             <div class="face back"><canvas id="caseback" role="img" aria-label="Exhibition case back with the movement"></canvas></div>
           </div>
         </div>
@@ -51,7 +52,7 @@
         <div class="mode-name" id="mode-name"></div>
         <button class="arrow" id="m-next" aria-label="Next complication">›</button>
       </div>
-      <div class="rings" role="tablist" aria-label="Bezel rings"><button role="tab" data-pg="1" aria-selected="true"><b>I</b> Complicazioni</button><button role="tab" data-pg="2" aria-selected="false"><b>II</b> Salone</button></div>
+      <div class="rings" role="tablist" aria-label="Bezel rings"><button role="tab" data-pg="1" aria-selected="true"><b>I</b> Complicazioni</button><button role="tab" data-pg="2" aria-selected="false"><b>II</b> Salone</button><button role="tab" data-pg="3" aria-selected="false"><b>III</b> Galleria</button></div>
       <div class="dock">
         <button data-act="flip" title="Turn the watch over (K)"><svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 0 1 14-5.3M20 12a8 8 0 0 1-14 5.3M18 3v4h-4M6 21v-4h4"/></svg><span>Turn over</span></button>
         <button data-act="breathe" title="Breathe on the glass (B)"><svg viewBox="0 0 24 24"><path d="M4 14h11a3 3 0 1 0-3-3M4 10h6M4 18h9a2.5 2.5 0 1 1-2.5 2.5"/></svg><span>Breathe</span></button>
@@ -71,12 +72,12 @@
 </div>
 <canvas id="moths" aria-hidden="true"></canvas>
 <div id="moth-tip" role="tooltip"><i>Acherontia styx</i> · death's-head hawkmoth</div>
-<canvas id="nv-grain" aria-hidden="true"></canvas><div class="nv-vignette" aria-hidden="true"></div>
+<div id="nv-grain" aria-hidden="true"></div><div class="nv-vignette" aria-hidden="true"></div>
 <div id="modal" role="dialog" aria-modal="true"><div id="modal-card" class="modal-card"></div></div>
 <div id="help" role="dialog" aria-label="Keyboard shortcuts"><div class="help-card"><button class="close x" aria-label="Close">×</button><div class="kicker">Regolazione</div><h2>Keyboard &amp; gestures</h2>
   <div class="keys">
     <div><kbd>←</kbd><kbd>→</kbd> or <kbd>[</kbd><kbd>]</kbd><span>Turn the bezel to the previous or next complication</span></div>
-    <div><kbd>V</kbd><span>Switch between ring I (complications) and ring II (the salon)</span></div>
+    <div><kbd>V</kbd> / <kbd>Shift+V</kbd><span>Next or previous ring: I Complicazioni, II Salone, III Galleria</span></div>
     <div><kbd>1</kbd>–<kbd>9</kbd>, <kbd>0</kbd><span>Jump to positions 1 to 10 on the current ring</span></div>
     <div><kbd>C</kbd><span>Minute repeater: strike the time on the gongs</span></div>
     <div><kbd>S</kbd><span>Speak the time (uses a British voice if your system has one)</span></div>
@@ -92,26 +93,35 @@
     <div><kbd>F</kbd><span>Fullscreen</span></div>
     <div><kbd>Y</kbd> / <kbd>N</kbd><span>Answer yes or no (Interrogation)</span></div>
     <div><kbd>Enter</kbd><span>Strike (Repeater) · <kbd>Space</kbd> also starts or pauses a Session</span></div>
+    <div><kbd>Z</kbd>–<kbd>M</kbd> · <kbd>Q</kbd>–<kbd>I</kbd><span>In Clavicembalo (ring III) the letter rows play the harpsichord</span></div>
+    <div><kbd>↑</kbd> / wheel<span>In La Carica, turn the crown to wind the mainspring</span></div>
+    <div><code>?view=compact</code><span>Open with only the watch showing; <kbd>Esc</kbd> returns to the full view</span></div>
     <div><kbd>?</kbd> · <kbd>Esc</kbd><span>Show this card · close whatever is open</span></div>
   </div>
   <p class="fine">Mouse: the scroll wheel turns the bezel, the pushers at 2 and 4 o'clock run the chronograph, the crown moves to the next complication, the slide on the left flank strikes the minute repeater, and a double-click turns the watch over. Some things happen only if you are persistent. Touch: swipe to change complication, long-press the crystal to breathe on it, and tilt the device to move the light and swing the rotor.</p></div></div>
 <div id="intro"></div>
 <div id="toast" role="status" aria-live="polite"></div>
+<button id="compact-exit" aria-label="Leave the compact view" title="Leave the compact view (Esc)">×</button>
 <div id="medal" role="status" aria-live="polite"></div>
-<script src="js/util.js"></script>
-<script src="js/audio.js"></script>
-<script src="js/dial.js"></script>
-<script src="js/caseback.js"></script>
-<script src="js/tourbillon.js"></script>
-<script src="js/effects.js"></script>
-<script src="js/modes-a.js"></script>
-<script src="js/menu.js"></script>
-<script src="js/parlour.js"></script>
-<script src="js/studio.js"></script>
-<script src="js/core2.js"></script>
-<script src="js/salon-a.js"></script>
-<script src="js/salon-b.js"></script>
-<script src="js/salon-c.js"></script>
-<script src="js/app.js"></script>
+<script src="js/util.js?v=3.0.0"></script>
+<script src="js/perf.js?v=3.0.0"></script>
+<script src="js/audio.js?v=3.0.0"></script>
+<script src="js/audio3.js?v=3.0.0"></script>
+<script src="js/dial.js?v=3.0.0"></script>
+<script src="js/caseback.js?v=3.0.0"></script>
+<script src="js/tourbillon.js?v=3.0.0"></script>
+<script src="js/effects.js?v=3.0.0"></script>
+<script src="js/modes-a.js?v=3.0.0"></script>
+<script src="js/menu.js?v=3.0.0"></script>
+<script src="js/parlour.js?v=3.0.0"></script>
+<script src="js/studio.js?v=3.0.0"></script>
+<script src="js/core2.js?v=3.0.0"></script>
+<script src="js/salon-a.js?v=3.0.0"></script>
+<script src="js/salon-b.js?v=3.0.0"></script>
+<script src="js/salon-c.js?v=3.0.0"></script>
+<script src="js/visual3.js?v=3.0.0"></script>
+<script src="js/galleria-a.js?v=3.0.0"></script>
+<script src="js/galleria-b.js?v=3.0.0"></script>
+<script src="js/app.js?v=3.0.0"></script>
 </body>
 </html>

@@ -32,13 +32,15 @@ MODES.push({
   show() { Watch.tourbTemp = true; this.seen = 0; },
   hide() { Watch.tourbTemp = false; },
   frame(dt) {
-    const cv = $('#tb-cv'); if (!cv || !cv.clientWidth) return; const d = Math.min(devicePixelRatio || 1, 2), W = cv.clientWidth; if (cv.width !== Math.round(W * d)) { cv.width = cv.height = Math.round(W * d); }
+    const cv = $('#tb-cv'); if (!cv || !cv.clientWidth) return; const d = Math.min(Perf.dpr(), 2), W = cv.clientWidth; if (cv.width !== Math.round(W * d)) { cv.width = cv.height = Math.round(W * d); this.ring = null; }
+    this._fa = (this._fa || 0) + dt; if (Perf.level === 0 && this._fa < 1 / 40) return; dt = this._fa; this._fa = 0;
     this.sim += dt * this.speed; this.seen += dt * this.speed; if (this.seen >= 60) { Bus.emit('ach', 'tourb'); this.seen = -1e9; }
     const x = cv.getContext('2d'); x.setTransform(d, 0, 0, d, 0, 0); x.clearRect(0, 0, W, W);
-    const R = W * 0.46; x.save(); x.shadowColor = 'rgba(0,0,0,.6)'; x.shadowBlur = 24; x.beginPath(); x.arc(W / 2, W / 2, R * 1.04, 0, TAU); x.fillStyle = metalConic(x, W / 2, W / 2, Watch.M(), 0.4); x.fill(); x.restore();
-    Tourbillon.draw(x, W / 2, W / 2, R, this.sim, { metal: Watch.M() });
-    const g = x.createRadialGradient(W * 0.35, W * 0.3, 0, W * 0.35, W * 0.3, R * 1.2); g.addColorStop(0, 'rgba(255,255,255,.12)'); g.addColorStop(1, 'rgba(255,255,255,0)'); x.fillStyle = g; x.beginPath(); x.arc(W / 2, W / 2, R, 0, TAU); x.fill();
-    $('#tb-sec').textContent = pad(Math.floor(this.sim % 60));
+    const R = W * 0.46, mk = Watch.metal() + W;
+    if (!this.ring || this.ringKey !== mk) { const c = this.ring = document.createElement('canvas'); c.width = c.height = cv.width; const rx = c.getContext('2d'); rx.scale(d, d); rx.shadowColor = 'rgba(0,0,0,.6)'; rx.shadowBlur = 24; rx.beginPath(); rx.arc(W / 2, W / 2, R * 1.04, 0, TAU); rx.fillStyle = metalConic(rx, W / 2, W / 2, Watch.M(), 0.4); rx.fill(); rx.shadowColor = 'transparent'; rx.save(); rx.beginPath(); rx.arc(W / 2, W / 2, R, 0, TAU); rx.clip(); rx.drawImage(Tourbillon.plate(R, false), W / 2 - R, W / 2 - R, R * 2, R * 2); rx.restore(); this.ringKey = mk; }
+    x.setTransform(1, 0, 0, 1, 0, 0); x.drawImage(this.ring, 0, 0); x.setTransform(d, 0, 0, d, 0, 0);
+    Tourbillon.draw(x, W / 2, W / 2, R, this.sim, { metal: Watch.M(), noPlate: true, gloss: true });
+    const sv = pad(Math.floor(this.sim % 60)); if (sv !== this._sv) { this._sv = sv; $('#tb-sec').textContent = sv; }
   }
 });
 
@@ -68,7 +70,8 @@ MODES.push({
   go() { const r = Repeater.strike(); if (r) this.fill(); },
   fill() { const c = Repeater.counts; if (!c || !$('#rp-h')) return; $('#rp-h').textContent = c.h; $('#rp-q').textContent = c.q; $('#rp-m').textContent = c.m; },
   frame() {
-    const cv = $('#rp-cv'); if (!cv || !cv.clientWidth) return; const d = Math.min(devicePixelRatio || 1, 2), W = cv.clientWidth, H = cv.clientHeight; if (cv.width !== Math.round(W * d)) { cv.width = Math.round(W * d); cv.height = Math.round(H * d); }
+    const act = Repeater.sch && Snd.ctx && Snd.ctx.currentTime < Repeater.sch.end + 1.6; if (!act && this._still) return; this._still = !act;
+    const cv = $('#rp-cv'); if (!cv || !cv.clientWidth) { this._still = false; return; } const d = Math.min(devicePixelRatio || 1, 2), W = cv.clientWidth, H = cv.clientHeight; if (cv.width !== Math.round(W * d)) { cv.width = Math.round(W * d); cv.height = Math.round(H * d); }
     const x = cv.getContext('2d'); x.setTransform(d, 0, 0, d, 0, 0); x.clearRect(0, 0, W, H);
     const now = Snd.ctx ? Snd.ctx.currentTime : 0, sch = Repeater.sch, M = Watch.M();
     const strikeAmt = (g) => { if (!sch) return 0; let v = 0; sch.ev.forEach(e => { if (e.g !== g) return; const dt = now - e.t; if (dt > -0.12 && dt < 0) v = Math.max(v, (dt + 0.12) / 0.12 * 0.6); if (dt >= 0 && dt < 0.5) v = Math.max(v, Math.exp(-dt * 9) * -0.4 + 0); }); return v; };

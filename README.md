@@ -5,6 +5,8 @@ A luxury-watch web app, rendered entirely in code: Canvas 2D, Web Audio, HTML an
 It has no build step, loads nothing from a CDN and makes no network requests. The fonts are bundled.
 **Version 2 (“Il Salone”)** adds a second ring of thirteen salon complications, richer rendering, a cinematic intro, achievements and secrets,
 and it installs as an offline app (PWA).
+**Version 3 (“La Galleria”)** is tuned for phones (tested against an iPhone 15 Pro Max profile), adds an adaptive quality governor,
+a new procedural audio engine, candlelit visuals and a third ring of twelve Galleria pieces.
 
 ## Run
 ```bash
@@ -17,6 +19,61 @@ Live: https://mandeerinfinity.github.io/the-lecter/
 ## Install it (PWA)
 On Chrome or Edge, use **Install** in the address bar or the **Install The Lecter** button in *Vetrina* (shown when the browser offers it). On iPhone, use Safari › Share › **Add to Home Screen**.
 A service worker (`sw.js`) caches every file, so the watch opens and runs with no connection. It uses relative paths, so it works at a site root or under `/the-lecter/`.
+
+## What's new in v3
+### Performance (iPhone 15 Pro Max: 430×932 CSS px, DPR 3, ProMotion)
+* **Settings › Performance: Auto / Smooth / Beautiful.** *Auto* measures real frame pacing (it detects 60, 90 or 120 Hz) and steps between three tiers
+  (Smooth → Balanced → Beautiful) every 1.5 s, with hysteresis so it doesn't oscillate. *Smooth* favours frame rate; *Beautiful* renders at full DPR.
+* **FPS meter**: Settings › *Show the frame-rate meter*, or add `?fps` to the URL. It shows fps, refresh rate, p95 frame time, JS time per frame, tier and canvas scale.
+* Canvas backing stores are capped (1.5× Smooth, 2× Balanced, full DPR only in Beautiful) and sized to their visible box.
+* The dial is drawn from cached layers: case, bezel, dial, sub-dials, lume and crystal are rendered once into off-screen canvases (small LRU keyed by light angle),
+  and each frame only blits them and draws the hands. A frame is skipped entirely when nothing visible changed.
+* Movement, tourbillon and moths use pre-rendered sprites with pre-blurred shadow sprites (no per-frame `shadowBlur`); moths clear only their own dirty rectangles.
+* No per-frame DOM writes; the loop is `requestAnimationFrame` time-based, so motion speed is the same at 60 or 120 Hz.
+* Expensive CSS removed: large `backdrop-filter`s, animated `filter: blur`, full-page `mix-blend-mode`, the per-frame night-vision grain (now one static noise tile moved by a
+  composited transform), and filter-based dimming (now an opacity overlay). Animations use transform and opacity only.
+* Hidden tabs, off-screen stages and idle complications do no drawing.
+* Measured with Playwright (iPhone 15 Pro Max emulation, headless, same script, v2 vs v3 back-to-back; headless WebKit is capped near 60 Hz):
+
+  | Mode | WebKit v2 → v3 (fps) | Chromium 4× CPU throttle v2 → v3 (fps) |
+  |---|---|---|
+  | Time (main dial) | 31 → 61 | 5.7 → 60 |
+  | Tourbillon close-up | 20 → 44 | 3.8 → 43 |
+  | Case back | 29 → 57 | 17.7 → 60 |
+  | Moth storm | 18 → 47 | 5.2 → 60 |
+  | Night vision | 12 → 48 | 5.5 → 60 |
+
+### Sound
+* Master chain: glue compressor → limiter. Convolution reverb from a generated **stone-room impulse response** (pre-delay, early reflections, a tail that darkens with time).
+* **Harpsichord** v3: the Karplus–Strong strings now pass through soundboard/body resonance modes, with a quill transient and a jack/damper click on release.
+* Modal-synthesis mechanical sounds, rendered once: escapement **tick/tock** pairs, **crown ratchet**, chronograph **pusher** down/up, **bezel detents**, a **case-flip whoosh**,
+  UI **hover** and **select** sounds. **Repeater gongs** now have inharmonic partials in beating pairs.
+* iOS-safe: the AudioContext is unlocked on the first touch with a silent buffer and resumed after backgrounding, `pageshow` or an interruption.
+* **Haptics**: `navigator.vibrate` where it exists; on iPhone (Safari 18+) a light tap through the system switch control. Settings › *Haptic feedback*.
+
+### Visuals
+* Candlelight: a warm pool of light and a glint on the crystal that flicker (compositor-driven CSS animation; switched off in the Smooth tier). Settings › *Candlelight flicker*.
+* Tilt parallax: the backdrop, candle, contact shadow and moths sit at different depths and shift against the tilt. Settings › *Parallax depth on tilt*.
+  On iPhone, Settings › *Enable tilt* asks for motion permission.
+* Stronger specular highlights and a faceted glint on the dauphine hands, a hot-spot reflection on the crystal, lapis sheen, 20-frame moth wingbeats with lagging hindwings.
+* **Dark after sunset**: Settings › *Dark after sunset, light after sunrise* switches to Bone Ivory by day and back to your dark dial at night, using the location set in *Sole*.
+* **Compact view**: `?view=compact` (or Settings › *Compact view*) shows only the watch. `Esc` or the × returns.
+
+## Ring III · Galleria (12 positions; press `V` to cycle rings, `Shift+V` backwards)
+| # | Piece | What it does and how to use it |
+|---|---|---|
+| 1 | **Calendario Perpetuo** | A perpetual calendar dial: day, date, month, four-year leap indicator, moon phase and a year window. Browse months with ‹ ›, tap a day, and the hands sweep to it. Explains 2100. |
+| 2 | **Secondo Fuso (GMT)** | Pick a second time zone. A 24-hour disc shades day and night from the real solar altitude. Switch on *Show the red GMT hand* to fit a GMT hand and a 24-hour track to the main dial. |
+| 3 | **Riserva & Cronometria** | Power-reserve gauge (0–42 h, linked to the case-back mainspring), rate in s/day, amplitude and beat error, and a live timegrapher trace for four positions. *Hold to wind*. |
+| 4 | **Lettere dal Dottore** | One original short letter per day, the same for everyone on a given date. *Earlier* / *Later*, *Copy*, *Read aloud*. |
+| 5 | **Clavicembalo** | A two-octave harpsichord. Play with a finger (glissando works), the mouse, or the keyboard (`Z`–`M` + `S D G H J`, `Q`–`I` + `2 3 5 6 7`). Four registrations, *Record* / *Play back* (saved), and a little original minuet. |
+| 6 | **La Carica** | A winding game: drag up and down on the crown (or wheel / `↑`). Each ratchet tooth clicks and taps. Fill the barrel from empty; the score rewards speed and an even rhythm. Winding also fills the real reserve. |
+| 7 | **Scacchi** | A chess problem of the day (ten built-in mates in one and two, each verified to have a unique solution). Tap a piece, then its square; *Hint*; *Previous* / *Next*. |
+| 8 | **Biblioteca** | 26 public-domain passages (Dante in Longfellow's translation, Marcus Aurelius in Long's, Seneca, Horace, Virgil, Shakespeare, Pascal, Blake, Keats, Poe…). Filter by author, *Another*, *Keep* favourites, *Read aloud*. |
+| 9 | **Firenze** | Four charcoal-and-sepia sketches (Duomo, Ponte Vecchio, Palazzo Vecchio, San Miniato) drawn in code in four depth layers. Move the pointer or tilt the phone for parallax. |
+| 10 | **Ricorrenze** | Birthdays and anniversaries. They show as gold pips on the date sub-dial, marked days in the perpetual calendar, and a reminder when you open the watch on the day. |
+| 11 | **Maree** | An astronomical tide dial: high/low water from the moon's transit plus your harbour's interval, spring/neap range, a 24-hour curve and an Earth–Moon–Sun diagram. Not for navigation. |
+| 12 | **Atelier** | The watch assembled piece by piece from its own rendered layers: movement, case, dial, hands, crystal, regulation. *Assemble* or *Slowly*. |
 
 ## Ring I · Complicazioni (15 positions on the rotating bezel)
 Pick a complication by clicking an icon on the bezel, pressing `←` / `→`, using the scroll wheel over the watch,

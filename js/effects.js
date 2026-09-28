@@ -78,7 +78,7 @@ const Backdrop = {
   cv: null,
   init() { this.cv = $('#bg'); this.draw(); },
   draw() {
-    const cv = this.cv, d = Math.min(devicePixelRatio || 1, 2), W = innerWidth, H = innerHeight; cv.width = W * d; cv.height = H * d;
+    const cv = this.cv, d = Math.min(devicePixelRatio || 1, Perf.mobile ? 1.5 : 2), W = innerWidth, H = innerHeight; cv.width = W * d; cv.height = H * d;
     const x = cv.getContext('2d'); x.scale(d, d); const T = Watch.theme;
     const g = x.createRadialGradient(W * 0.36, H * 0.48, 0, W * 0.4, H * 0.5, Math.max(W, H) * 0.8);
     g.addColorStop(0, mix(T.bg, T.dial[0], 0.35)); g.addColorStop(0.5, T.bg); g.addColorStop(1, '#000000'); x.fillStyle = g; x.fillRect(0, 0, W, H);
@@ -104,7 +104,7 @@ const Fog = {
     for (let i = 0; i < 700; i++) { const x = Math.random() * 96, y = Math.random() * 96, rr = Math.random() * 1.3 + 0.3; gx.beginPath(); gx.arc(x, y, rr, 0, TAU); gx.fillStyle = `rgba(255,255,255,${0.15 + Math.random() * 0.35})`; gx.fill(); }
     this.grain = g; this.resize();
   },
-  resize() { const css = this.cv.clientWidth || 600, d = Math.min(devicePixelRatio || 1, 2); this.cv.width = css * d; this.cv.height = css * d; this.css = css; this.dp = d; this.pat = null; },
+  resize() { const css = this.cv.clientWidth || 600, d = Math.min(Perf.dpr(), 1.5); this.cv.width = css * d; this.cv.height = css * d; this.css = css; this.dp = d; this.pat = null; },
   breathe() {
     if (!Settings.fog) { toast('Breath on the glass is switched off in Settings'); return; }
     const N = this.N, start = performance.now(), r = mulberry32(Date.now() & 0xffff), cx = N * (0.45 + r() * 0.1), cy = N * (0.55 + r() * 0.1);
@@ -140,7 +140,7 @@ const Fog = {
 const DialInk = {
   cv: null, ctx: null, brush: null, on: false,
   init(canvas) { this.cv = canvas; this.ctx = canvas.getContext('2d'); this.resize(); this.brush = new CharcoalBrush(this.ctx, this.d); this.brush.color = '#1a1716'; },
-  resize() { const css = this.cv.clientWidth || 600, d = Math.min(devicePixelRatio || 1, 2); let keep = null; if (this.cv.width) { keep = document.createElement('canvas'); keep.width = this.cv.width; keep.height = this.cv.height; keep.getContext('2d').drawImage(this.cv, 0, 0); }
+  resize() { const css = this.cv.clientWidth || 600, d = Math.min(Perf.dpr(), 2); let keep = null; if (this.cv.width) { keep = document.createElement('canvas'); keep.width = this.cv.width; keep.height = this.cv.height; keep.getContext('2d').drawImage(this.cv, 0, 0); }
     this.cv.width = css * d; this.cv.height = css * d; this.d = d; this.css = css; this.ctx.setTransform(d, 0, 0, d, 0, 0); if (keep) { this.ctx.save(); this.ctx.setTransform(1, 0, 0, 1, 0, 0); this.ctx.drawImage(keep, 0, 0, this.cv.width, this.cv.height); this.ctx.restore(); } if (this.brush) this.brush.dpr = d; },
   setOn(v) { this.on = v; this.cv.classList.toggle('active', v); document.body.classList.toggle('inking', v); },
   clear() { this.ctx.save(); this.ctx.setTransform(1, 0, 0, 1, 0, 0); this.ctx.clearRect(0, 0, this.cv.width, this.cv.height); this.ctx.restore(); },
@@ -155,25 +155,30 @@ const Moths = {
     addEventListener('pointermove', e => { this.touch = e.pointerType === 'touch'; const m = this.mouse, now = performance.now(), dt = Math.max(1, now - m.t); m.vx = (e.clientX - m.x) / dt; m.vy = (e.clientY - m.y) / dt; m.x = e.clientX; m.y = e.clientY; m.t = now; }, { passive: true });
     addEventListener('pointerdown', e => { if (e.target.closest('button,input,select,textarea,a,.panel,canvas.sketch')) return; this.scatter(e.clientX, e.clientY); }, { passive: true });
   },
-  resize() { this.d = Math.min(devicePixelRatio || 1, 2); this.cv.width = innerWidth * this.d; this.cv.height = innerHeight * this.d; },
+  resize() { this.d = Math.min(devicePixelRatio || 1, Perf.level === 0 ? 1 : Perf.mobile ? 1.5 : 2); this.cv.width = innerWidth * this.d; this.cv.height = innerHeight * this.d; },
+  /* 20 frames of a wingbeat: the forewing leads, the hindwing follows a fraction later, and both foreshorten as they rise */
   makeFrames() {
-    const S = 64, F = 12;
+    const S = 64, F = 20; this.frames = []; this.nvFrames = null;
     for (let f = 0; f < F; f++) {
       const c = document.createElement('canvas'); c.width = c.height = S * 2; const x = c.getContext('2d'); x.scale(2, 2); x.translate(S / 2, S / 2);
-      const open = 0.25 + 0.75 * Math.abs(Math.cos(f / F * Math.PI));
+      const ph = f / F * TAU, fore = 0.18 + 0.82 * (0.5 + 0.5 * Math.cos(ph)), hind = 0.18 + 0.82 * (0.5 + 0.5 * Math.cos(ph - 0.55)), lift = Math.sin(ph) * 1.6;
       [-1, 1].forEach(sg => {
-        x.save(); x.scale(sg * open, 1);
         // hindwing (ochre with black bands)
+        x.save(); x.translate(0, lift * 0.5); x.scale(sg * hind, 1);
         x.beginPath(); x.moveTo(2, 2); x.bezierCurveTo(10, 0, 18, 6, 16, 12); x.bezierCurveTo(12, 16, 5, 13, 2, 8); x.closePath();
         const hg = x.createLinearGradient(2, 4, 16, 12); hg.addColorStop(0, '#3a2410'); hg.addColorStop(0.35, '#d99a2b'); hg.addColorStop(0.6, '#1c1208'); hg.addColorStop(0.75, '#e0a63a'); hg.addColorStop(1, '#2a1a0a'); x.fillStyle = hg; x.fill();
-        // forewing (mottled umber)
+        x.strokeStyle = 'rgba(20,10,4,.5)'; x.lineWidth = 0.4; x.beginPath(); x.moveTo(3, 4); x.quadraticCurveTo(9, 5, 14, 11); x.stroke();
+        x.restore();
+        // forewing (mottled umber, veins, pale stigma, fringe)
+        x.save(); x.translate(0, lift); x.scale(sg * fore, 1 - 0.08 * (1 - fore));
         x.beginPath(); x.moveTo(2, -4); x.bezierCurveTo(10, -10, 22, -12, 29, -9); x.bezierCurveTo(27, -4, 22, 2, 13, 5); x.bezierCurveTo(8, 6, 4, 4, 2, 2); x.closePath();
-        const fg = x.createLinearGradient(2, -6, 28, -6); fg.addColorStop(0, '#2b1d12'); fg.addColorStop(0.4, '#5a4330'); fg.addColorStop(0.7, '#3a2a1c'); fg.addColorStop(1, '#6c5440'); x.fillStyle = fg; x.fill();
-        x.strokeStyle = 'rgba(210,180,140,.35)'; x.lineWidth = 0.5; x.beginPath(); x.moveTo(6, -3); x.quadraticCurveTo(16, -6, 26, -8); x.moveTo(8, 1); x.quadraticCurveTo(16, -1, 23, -4); x.stroke();
-        x.fillStyle = 'rgba(230,210,170,.5)'; x.beginPath(); x.arc(14, -4, 1.1, 0, TAU); x.fill();
+        const fg = x.createLinearGradient(2, -6, 28, -6); fg.addColorStop(0, '#2b1d12'); fg.addColorStop(0.35, '#5a4330'); fg.addColorStop(0.55, '#2e2016'); fg.addColorStop(0.75, '#6a523c'); fg.addColorStop(1, '#8a7258'); x.fillStyle = fg; x.fill();
+        x.save(); x.clip(); x.fillStyle = 'rgba(0,0,0,.25)'; x.beginPath(); x.ellipse(20, -3, 7, 3, -0.4, 0, TAU); x.fill(); x.fillStyle = 'rgba(230,205,160,.18)'; x.beginPath(); x.ellipse(9, -2, 4, 2, -0.3, 0, TAU); x.fill(); x.restore();
+        x.strokeStyle = 'rgba(210,180,140,.35)'; x.lineWidth = 0.45; x.beginPath(); x.moveTo(6, -3); x.quadraticCurveTo(16, -6, 26, -8); x.moveTo(8, 1); x.quadraticCurveTo(16, -1, 23, -4); x.moveTo(4, -1); x.quadraticCurveTo(14, -2, 20, 2); x.stroke();
+        x.fillStyle = 'rgba(236,216,176,.6)'; x.beginPath(); x.arc(14, -4, 1.1, 0, TAU); x.fill();
         x.restore();
       });
-      // body: thorax with pale skull-like marking, banded abdomen
+      // body: thorax with pale skull-like marking, banded abdomen, antennae
       x.fillStyle = '#20160e'; x.beginPath(); x.ellipse(0, -2, 3.4, 5, 0, 0, TAU); x.fill();
       x.fillStyle = '#e6d3a8'; x.beginPath(); x.ellipse(0, -2.6, 2.1, 2.4, 0, 0, TAU); x.fill();
       x.fillStyle = '#20160e'; x.beginPath(); x.arc(-0.8, -3, 0.55, 0, TAU); x.arc(0.8, -3, 0.55, 0, TAU); x.fill();
@@ -182,21 +187,32 @@ const Moths = {
       x.strokeStyle = '#3a2a1a'; x.lineWidth = 0.6; x.beginPath(); x.moveTo(-0.8, -8.5); x.quadraticCurveTo(-3, -12, -4, -13); x.moveTo(0.8, -8.5); x.quadraticCurveTo(3, -12, 4, -13); x.stroke();
       this.frames.push(c);
     }
+    // one soft shadow, blurred once, blitted under every moth (no per-moth shadowBlur)
+    const sh = document.createElement('canvas'); sh.width = sh.height = 128; const sx = sh.getContext('2d');
+    sx.shadowColor = 'rgba(0,0,0,.55)'; sx.shadowBlur = 12; sx.shadowOffsetX = 512; sx.drawImage(this.frames[5], -512 + 8, 8, 112, 112); this.shadow = sh;
+  },
+  tinted() {
+    if (this.nvFrames) return this.nvFrames;
+    return (this.nvFrames = this.frames.map(f => { const c = document.createElement('canvas'); c.width = f.width; c.height = f.height; const x = c.getContext('2d'); x.drawImage(f, 0, 0); x.globalCompositeOperation = 'source-atop'; x.fillStyle = 'rgba(110,255,120,.6)'; x.fillRect(0, 0, c.width, c.height); return c; }));
   },
   setCount(n) {
     const W = innerWidth, H = innerHeight;
     while (this.list.length < n) this.list.push({ x: Math.random() * W, y: Math.random() * H, vx: rand(-1, 1), vy: rand(-1, 1), ph: Math.random() * 12, s: rand(0.55, 1.05), orbit: rand(0.95, 1.65), dir: Math.random() < 0.5 ? 1 : -1, rest: 0, seed: Math.random() * 100 });
-    this.list.length = n; if (!n) this.ctx.clearRect(0, 0, this.cv.width, this.cv.height);
+    this.list.length = n; if (!n) { this.ctx.setTransform(1, 0, 0, 1, 0, 0); this.ctx.clearRect(0, 0, this.cv.width, this.cv.height); }
   },
-  storm(sec = 8) { const n = innerWidth < 900 ? 60 : 110; this.stormUntil = performance.now() + sec * 1000; this.setCount(Math.max(this.list.length, n)); const W = innerWidth, H = innerHeight; this.list.forEach(m => { m.vx = rand(-6, 6); m.vy = rand(-6, 6); }); document.body.classList.add('storm'); setTimeout(() => document.body.classList.remove('storm'), sec * 1000); },
+  storm(sec = 8) { const n = Perf.mobile ? [16, 26, 36][Perf.level] : [50, 90, 120][Perf.level]; this.stormUntil = performance.now() + sec * 1000; this.setCount(Math.max(this.list.length, n)); const W = innerWidth, H = innerHeight; this.list.forEach(m => { m.vx = rand(-6, 6); m.vy = rand(-6, 6); }); document.body.classList.add('storm'); setTimeout(() => document.body.classList.remove('storm'), sec * 1000); },
   scatter(x, y) { this.list.forEach(m => { const dx = m.x - x, dy = m.y - y, d = Math.hypot(dx, dy) || 1; if (d < 260) { m.vx += dx / d * 9; m.vy += dy / d * 9; } }); },
   update(dt, t) {
-    const L = this.list; if (!L.length) { this.tip.classList.remove('show'); return; }
+    const L = this.list; if (!L.length) { if (this._tipOn !== false) { this._tipOn = false; this.tip.classList.remove('show'); this._full = true; this.ctx && this.ctx.clearRect(0, 0, this.cv.width, this.cv.height); } return; }
     if (!this._st || t - this._stt > 0.5 || t < this._stt) { this._st = $('#stage-watch').getBoundingClientRect(); this._stt = t; } const c = this.ctx, st = this._st, storm = this.stormUntil && performance.now() < this.stormUntil, wx = st.left + st.width / 2, wy = st.top + st.height / 2, wr = st.width * (storm ? 0.5 : 0.36);
-    if (this.stormUntil && !storm) { this.stormUntil = 0; this.setCount(Settings.moths && !Settings.reducedMotion ? (App.lowPower ? Math.min(10, Settings.mothCount) : Settings.mothCount) : 0); if (!this.list.length) return; }
+    if (this.stormUntil && !storm) { this.stormUntil = 0; this.setCount(App.mothTarget()); if (!this.list.length) return; }
     const mo = this.mouse, speed = Math.hypot(mo.vx, mo.vy); let hov = null, hd = 22; const small = innerWidth < 900, sc = small ? 0.62 : 1;
     if (!this._pr || t - this._prt > 0.5) { const pe = $('#panel'); this._pr = !small && pe ? pe.getBoundingClientRect() : null; this._prt = t; } const pr = this._pr;
-    c.setTransform(this.d, 0, 0, this.d, 0, 0); c.clearRect(0, 0, innerWidth, innerHeight);
+    c.setTransform(1, 0, 0, 1, 0, 0);
+    // dirty rectangles: clear only where each moth (and its shadow) was drawn last frame
+    if (this._full || !this._dirty) { c.clearRect(0, 0, this.cv.width, this.cv.height); this._full = false; } else for (const r of this._dirty) c.clearRect(r[0], r[1], r[2], r[3]);
+    const dirty = this._dirty = [];
+    const d = this.d, frames = Watch.theme.nv ? this.tinted() : this.frames, shadows = Perf.level > 0 && L.length < (Perf.mobile ? 20 : 60);
     for (const m of L) {
       const dx = m.x - mo.x, dy = m.y - mo.y, dm = Math.hypot(dx, dy);
       if (!this.touch && dm < hd && speed < 0.6) { hov = m; hd = dm; }
@@ -213,23 +229,23 @@ const Moths = {
         const sp = Math.hypot(m.vx, m.vy), max = storm ? 7.5 : 3.4; if (sp > max) { m.vx *= max / sp; m.vy *= max / sp; }
         m.vx *= 0.985; m.vy *= 0.985; m.x += m.vx * 60 * dt; m.y += m.vy * 60 * dt; m.ph += dt * (14 + sp * 3);
       }
-      const ang = Math.atan2(m.vy, m.vx) + Math.PI / 2, fr = this.frames[Math.floor(m.ph) % this.frames.length], size = 46 * m.s * sc;
-      c.save(); c.translate(m.x, m.y); c.rotate(ang); c.globalAlpha = 0.92;
-      if (!App.lowPower && L.length < 70) { c.shadowColor = 'rgba(0,0,0,.6)'; c.shadowBlur = 8; c.shadowOffsetY = 6; }
-      c.drawImage(fr, -size / 2, -size / 2, size, size); c.restore();
+      const ang = Math.atan2(m.vy, m.vx) + Math.PI / 2, fr = frames[((Math.floor(m.ph) % frames.length) + frames.length) % frames.length], size = 46 * m.s * sc, h = size / 2, co = Math.cos(ang) * d, si = Math.sin(ang) * d;
+      if (shadows) { c.globalAlpha = 0.5; c.setTransform(co, si, -si, co, m.x * d, (m.y + 7) * d); c.drawImage(this.shadow, -h, -h, size, size); }
+      c.globalAlpha = 0.93; c.setTransform(co, si, -si, co, m.x * d, m.y * d); c.drawImage(fr, -h, -h, size, size);
+      const pad = (h + 2) * d * 1.42; dirty.push([m.x * d - pad, m.y * d - pad, pad * 2, pad * 2 + 8 * d]);
     }
+    c.globalAlpha = 1;
     this.hover = hov;
-    if (hov) { this.tip.style.transform = `translate(${hov.x + 16}px, ${hov.y - 34}px)`; this.tip.classList.add('show'); } else this.tip.classList.remove('show');
+    if (hov) { this.tip.style.transform = `translate(${hov.x + 16}px, ${hov.y - 34}px)`; if (!this._tipOn) { this._tipOn = true; this.tip.classList.add('show'); } } else if (this._tipOn) { this._tipOn = false; this.tip.classList.remove('show'); }
   }
 };
 
-/* ——— night-vision grain ——— */
+/* ——— night-vision grain: one static noise tile, jittered by a composited CSS transform (no per-frame pixel work) ——— */
 const NVGrain = {
-  cv: null, ctx: null, id: null, t: 0,
-  init() { this.cv = $('#nv-grain'); this.cv.width = 240; this.cv.height = 150; this.ctx = this.cv.getContext('2d'); this.id = this.ctx.createImageData(240, 150); },
-  render(t) {
-    if (!Watch.theme.nv || !Settings.nvNoise) return; if (t - this.t < 0.05) return; this.t = t;
-    const d = this.id.data; for (let i = 0; i < d.length; i += 4) { const v = Math.random() * 255; d[i] = v * 0.6; d[i + 1] = v; d[i + 2] = v * 0.55; d[i + 3] = 60; }
-    this.ctx.putImageData(this.id, 0, 0);
-  }
+  init() {
+    const c = document.createElement('canvas'); c.width = c.height = 192; const x = c.getContext('2d'), id = x.createImageData(192, 192), d = id.data;
+    for (let i = 0; i < d.length; i += 4) { const v = Math.random(); d[i] = 150 + v * 90; d[i + 1] = 255; d[i + 2] = 140 + v * 80; d[i + 3] = v > 0.55 ? (v - 0.55) * 300 : 0; }
+    x.putImageData(id, 0, 0); const g = $('#nv-grain'); if (g) g.style.backgroundImage = `url(${c.toDataURL('image/png')})`;
+  },
+  render() {}
 };

@@ -5,7 +5,7 @@ const CaseBack = {
   rotor: { a: 0.6, v: 0 }, power: Store.get('power', 0.82), grav: null, dragV: 0,
   init(canvas) { this.cv = canvas; this.ctx = canvas.getContext('2d'); this.resize(); },
   resize() {
-    const css = this.cv.clientWidth || 600; this.dpr = Math.min(window.devicePixelRatio || 1, 2.5);
+    const css = this.cv.clientWidth || 600; this.dpr = Perf.dpr();
     this.W = css; this.cv.width = Math.round(css * this.dpr); this.cv.height = Math.round(css * this.dpr);
     this.R = css * 0.375; this.w = this.R * 0.74; this.layers = {};
   },
@@ -105,7 +105,43 @@ const CaseBack = {
     };
     const brass = ['#ffe6a8', '#b2872f'];
     this.sprites = { barrel: gearSprite(G.barrel[2], 72, 5, brass), center: gearSprite(G.center[2], 64, 4, brass), third: gearSprite(G.third[2], 56, 4, brass), fourth: gearSprite(G.fourth[2], 48, 4, brass), escape: this.escSprite(G.escape[2]) };
+    // pre-blurred shadow sprites: no canvas shadowBlur at run time, which is the costliest thing a phone GPU can be asked for per frame
+    this.shadows = {}; Object.keys(this.sprites).forEach(k => { this.shadows[k] = this.shadowOf(this.sprites[k], w * 0.03); });
+    this.sprites.balance = this.balSprite(G.balance[2]); this.shadows.balance = this.shadowOf(this.sprites.balance, 6);
+    this.sprites.rotor = this.rotorSprite(); this.shadows.rotor = this.shadowOf(this.sprites.rotor, w * 0.06);
     this.layers.built = this.key();
+  },
+  /* the blurred silhouette of a sprite, rendered once (the shadow is thrown off-canvas and only its blur lands in view) */
+  shadowOf(src, blur) {
+    const d = this.dpr, pad = Math.ceil(blur * 2.2 * d), c = document.createElement('canvas'); c.width = src.width + pad * 2; c.height = src.height + pad * 2; const x = c.getContext('2d');
+    x.shadowColor = 'rgba(0,0,0,.55)'; x.shadowBlur = blur * d; x.shadowOffsetX = c.width * 2; x.drawImage(src, pad - c.width * 2, pad); c.pad = pad; return c;
+  },
+  blit(ctx, sp, x, y, ang, sh, ox = 0, oy = 0) {
+    const d = this.dpr;
+    if (sh) { ctx.save(); ctx.translate(x + ox, y + oy); ctx.rotate(ang); ctx.drawImage(sh, -sh.width / 2 / d, -sh.height / 2 / d, sh.width / d, sh.height / d); ctx.restore(); }
+    ctx.save(); ctx.translate(x, y); ctx.rotate(ang); ctx.drawImage(sp, -sp.width / 2 / d, -sp.height / 2 / d, sp.width / d, sp.height / d); ctx.restore();
+  },
+  balSprite(br) {
+    const d = this.dpr, s = Math.ceil(br * 2.3 * d), c = document.createElement('canvas'); c.width = c.height = s; const x = c.getContext('2d'); x.scale(d, d); x.translate(s / 2 / d, s / 2 / d);
+    const g = x.createRadialGradient(-br * 0.3, -br * 0.3, br * 0.5, 0, 0, br); g.addColorStop(0, '#fff0c0'); g.addColorStop(1, '#a8802c');
+    x.beginPath(); x.arc(0, 0, br, 0, TAU); x.arc(0, 0, br * 0.84, 0, TAU, true); x.fillStyle = g; x.fill('evenodd');
+    x.beginPath(); x.arc(0, 0, br * 0.995, -2.2, -0.9); x.strokeStyle = 'rgba(255,255,255,.55)'; x.lineWidth = 0.8; x.stroke();
+    for (let k = 0; k < 3; k++) { x.save(); x.rotate(k * TAU / 3); x.fillStyle = '#c9a24a'; x.fillRect(-br * 0.035, -br * 0.86, br * 0.07, br * 0.86); x.restore(); }
+    for (let k = 0; k < 8; k++) { const a = k * TAU / 8 + 0.2, sx = Math.sin(a) * br * 1.02, sy = -Math.cos(a) * br * 1.02, sg = x.createRadialGradient(sx - br * 0.015, sy - br * 0.015, 0, sx, sy, br * 0.05); sg.addColorStop(0, '#fff3c8'); sg.addColorStop(1, '#b8902f'); x.beginPath(); x.arc(sx, sy, br * 0.05, 0, TAU); x.fillStyle = sg; x.fill(); }
+    x.beginPath(); x.arc(0, 0, br * 0.12, 0, TAU); x.fillStyle = '#d9b457'; x.fill();
+    x.beginPath(); x.arc(0, -br * 0.2, br * 0.035, 0, TAU); x.fillStyle = '#c0142e'; x.fill();
+    return c;
+  },
+  rotorSprite() {
+    const d = this.dpr, w = this.w, s = Math.ceil(w * 2.05 * d), c = document.createElement('canvas'); c.width = c.height = s; const x = c.getContext('2d'); x.scale(d, d); x.translate(s / 2 / d, s / 2 / d);
+    const g = x.createLinearGradient(-w, 0, w, 0); g.addColorStop(0, '#f8e2a4'); g.addColorStop(0.3, '#c69b45'); g.addColorStop(0.55, '#fff0c4'); g.addColorStop(0.8, '#b6893a'); g.addColorStop(1, '#f1d38c');
+    x.beginPath(); x.arc(0, 0, w * 0.97, Math.PI * 0.08, Math.PI * 0.92); x.arc(0, 0, w * 0.62, Math.PI * 0.92, Math.PI * 0.08, true); x.closePath(); x.fillStyle = g; x.fill();
+    // Côtes circulaires on the weight
+    x.save(); x.clip(); for (let k = w * 0.63; k < w * 0.97; k += w * 0.035) { x.beginPath(); x.arc(0, w * 0.1, k, 0, TAU); x.strokeStyle = 'rgba(120,80,20,.16)'; x.lineWidth = w * 0.012; x.stroke(); } x.restore();
+    [0.28, 0.5, 0.72].forEach(k => { x.save(); x.rotate(Math.PI * k - Math.PI / 2); x.fillStyle = g; roundRect(x, -w * 0.035, 0, w * 0.07, w * 0.64, w * 0.02); x.fill(); x.restore(); });
+    x.beginPath(); x.arc(0, 0, w * 0.11, 0, TAU); x.fillStyle = g; x.fill(); x.beginPath(); x.arc(0, 0, w * 0.04, 0, TAU); x.fillStyle = '#8c97b0'; x.fill();
+    x.fillStyle = 'rgba(70,45,10,.7)'; x.font = `700 ${w * 0.062}px Cinzel, serif`; arcText(x, 'CINCO CORPORATION', 0, 0, w * 0.795, Math.PI, w * 0.012, true);
+    return c;
   },
   escSprite(rad) {
     const s = Math.ceil(rad * 2.3 * this.dpr), c = document.createElement('canvas'); c.width = c.height = s; const g = c.getContext('2d'); g.scale(this.dpr, this.dpr); g.translate(s / 2 / this.dpr, s / 2 / this.dpr);
@@ -132,13 +168,14 @@ const CaseBack = {
     const f = 4, t = this.simT, amp = (0.55 + 0.45 * this.power) * 1.5 * Math.PI * (this.power > 0.01 ? 1 : 0);
     const beats = Math.floor(t * f * 2), phaseInBeat = t * f * 2 - beats, ease = Math.min(1, phaseInBeat / 0.12);
     const step = beats + ease - (phaseInBeat < 0.12 ? 0 : 0);
-    const draw = (sp, pos, ang) => { ctx.save(); ctx.translate(pos[0], pos[1]); ctx.rotate(ang); ctx.drawImage(sp, -sp.width / 2 / this.dpr, -sp.height / 2 / this.dpr, sp.width / this.dpr, sp.height / this.dpr); ctx.restore(); };
-    ctx.save(); ctx.shadowColor = 'rgba(0,0,0,.5)'; ctx.shadowBlur = w * 0.03; ctx.shadowOffsetY = w * 0.012;
-    draw(S.barrel, G.barrel, -step * TAU / 400000);
-    draw(S.center, G.center, step * TAU / 28800);
-    draw(S.third, G.third, -step * TAU / 3600);
-    draw(S.fourth, G.fourth, step * TAU / 480);
-    draw(S.escape, G.escape, -step * TAU / 40);
+    const sh = Perf.q.blur ? this.shadows : {}, oy = w * 0.012;
+    const draw = (k, pos, ang) => this.blit(ctx, S[k], pos[0], pos[1], ang, sh[k], 0, oy);
+    draw('barrel', G.barrel, -step * TAU / 400000);
+    draw('center', G.center, step * TAU / 28800);
+    draw('third', G.third, -step * TAU / 3600);
+    draw('fourth', G.fourth, step * TAU / 480);
+    draw('escape', G.escape, -step * TAU / 40);
+    ctx.save();
     // pallet fork
     const fork = 0.2 * Math.tanh(6 * Math.sin(TAU * f * t));
     ctx.save(); ctx.translate(G.pallet[0], G.pallet[1]); ctx.rotate(Math.atan2(G.balance[1] - G.pallet[1], G.balance[0] - G.pallet[0]) + Math.PI + fork);
@@ -148,7 +185,7 @@ const CaseBack = {
     ctx.restore(); ctx.restore();
     // balance wheel (+ motion ghosts at real speed)
     const bal = (tt) => amp * Math.sin(TAU * f * tt);
-    const ghosts = this.speed > 0.5 ? 4 : 1;
+    const ghosts = this.speed > 0.5 ? Perf.q.ghosts : 1;
     for (let gI = ghosts - 1; gI >= 0; gI--) { ctx.globalAlpha = gI === 0 ? 1 : 0.18; this.drawBalance(ctx, bal(t - gI * 0.006 * this.speed), gI === 0); }
     ctx.globalAlpha = 1;
     ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(this.layers.bridges, 0, 0); ctx.setTransform(this.dpr, 0, 0, this.dpr, this.W / 2 * this.dpr, this.W / 2 * this.dpr);
@@ -162,22 +199,12 @@ const CaseBack = {
   },
   drawBalance(ctx, ang, full) {
     const [bx, by, br] = this.G.balance, w = this.w;
-    ctx.save(); ctx.translate(bx, by);
     if (full) { // hairspring breathes with the balance
-      ctx.beginPath(); const turns = 11, n = 360;
+      ctx.save(); ctx.translate(bx, by); ctx.beginPath(); const turns = 11, n = Perf.q.spring;
       for (let i = 0; i <= n; i++) { const rho = i / n, rad = w * 0.02 + rho * br * 0.55, th = rho * turns * TAU + ang * (1 - rho) * 0.9; ctx.lineTo(Math.cos(th) * rad, Math.sin(th) * rad); }
-      ctx.strokeStyle = 'rgba(60,90,190,.9)'; ctx.lineWidth = 0.7; ctx.stroke();
+      ctx.strokeStyle = 'rgba(60,90,190,.9)'; ctx.lineWidth = 0.7; ctx.stroke(); ctx.restore();
     }
-    ctx.rotate(ang);
-    ctx.shadowColor = 'rgba(0,0,0,.5)'; ctx.shadowBlur = full ? 6 : 0; ctx.shadowOffsetY = 3;
-    const g = ctx.createRadialGradient(-br * 0.3, -br * 0.3, br * 0.5, 0, 0, br); g.addColorStop(0, '#fff0c0'); g.addColorStop(1, '#a8802c');
-    ctx.beginPath(); ctx.arc(0, 0, br, 0, TAU); ctx.arc(0, 0, br * 0.84, 0, TAU, true); ctx.fillStyle = g; ctx.fill('evenodd');
-    for (let k = 0; k < 3; k++) { ctx.save(); ctx.rotate(k * TAU / 3); ctx.fillStyle = '#c9a24a'; ctx.fillRect(-br * 0.035, -br * 0.86, br * 0.07, br * 0.86); ctx.restore(); }
-    ctx.shadowColor = 'transparent';
-    for (let k = 0; k < 8; k++) { const a = k * TAU / 8 + 0.2; ctx.beginPath(); ctx.arc(Math.sin(a) * br * 1.02, -Math.cos(a) * br * 1.02, br * 0.05, 0, TAU); ctx.fillStyle = '#e8c56b'; ctx.fill(); }
-    ctx.beginPath(); ctx.arc(0, 0, br * 0.12, 0, TAU); ctx.fillStyle = '#d9b457'; ctx.fill();
-    ctx.beginPath(); ctx.arc(0, -br * 0.2, br * 0.035, 0, TAU); ctx.fillStyle = '#c0142e'; ctx.fill(); // impulse jewel
-    ctx.restore();
+    this.blit(ctx, this.sprites.balance, bx, by, ang, full && Perf.q.blur ? this.shadows.balance : null, 0, 3);
   },
   drawRotor(ctx, dt) {
     const w = this.w, ro = this.rotor;
@@ -186,14 +213,6 @@ const CaseBack = {
     let d = ((gAng - ro.a) % TAU + TAU * 1.5) % TAU - Math.PI;
     ro.v += (Math.sin(d) * 6 - ro.v * 1.4) * dt + this.dragV; this.dragV = 0;
     const prev = ro.a; ro.a += ro.v * dt; this.wind(Math.abs(ro.a - prev) * 0.004);
-    ctx.save(); ctx.rotate(ro.a);
-    ctx.shadowColor = 'rgba(0,0,0,.6)'; ctx.shadowBlur = w * 0.06; ctx.shadowOffsetY = w * 0.02;
-    const g = ctx.createLinearGradient(-w, 0, w, 0); g.addColorStop(0, '#f8e2a4'); g.addColorStop(0.3, '#c69b45'); g.addColorStop(0.55, '#fff0c4'); g.addColorStop(0.8, '#b6893a'); g.addColorStop(1, '#f1d38c');
-    ctx.beginPath(); ctx.arc(0, 0, w * 0.97, Math.PI * 0.08, Math.PI * 0.92); ctx.arc(0, 0, w * 0.62, Math.PI * 0.92, Math.PI * 0.08, true); ctx.closePath(); ctx.fillStyle = g; ctx.fill();
-    ctx.shadowColor = 'transparent';
-    [0.28, 0.5, 0.72].forEach(k => { ctx.save(); ctx.rotate(Math.PI * k - Math.PI / 2); ctx.fillStyle = g; roundRect(ctx, -w * 0.035, 0, w * 0.07, w * 0.64, w * 0.02); ctx.fill(); ctx.restore(); });
-    ctx.beginPath(); ctx.arc(0, 0, w * 0.11, 0, TAU); ctx.fillStyle = g; ctx.fill(); ctx.beginPath(); ctx.arc(0, 0, w * 0.04, 0, TAU); ctx.fillStyle = '#8c97b0'; ctx.fill();
-    ctx.fillStyle = 'rgba(70,45,10,.7)'; ctx.font = `700 ${w * 0.062}px Cinzel, serif`; arcText(ctx, 'CINCO CORPORATION', 0, 0, w * 0.795, Math.PI, w * 0.012, true);
-    ctx.restore();
+    this.blit(ctx, this.sprites.rotor, 0, 0, ro.a, Perf.q.blur ? this.shadows.rotor : null, 0, w * 0.02);
   }
 };

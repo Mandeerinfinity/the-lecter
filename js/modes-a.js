@@ -278,7 +278,7 @@ MODES.push({
       <p class="fine">Drag across the case back to spin the rotor, which winds the watch. On a phone, tilting it lets the rotor swing under gravity. Balance amplitude drops as the power reserve runs down. Press <kbd>K</kbd> to turn the watch over from any mode.</p>`;
     $$('#cb-speed button', el).forEach(b => b.onclick = () => { $$('#cb-speed button').forEach(x => x.classList.remove('on')); b.classList.add('on'); CaseBack.speed = +b.dataset.v; });
     let hold = null; const w = $('#cb-wind', el);
-    const start = (e) => { e.preventDefault(); Snd.ensure(); clearInterval(hold); hold = setInterval(() => { CaseBack.wind(0.012); Watch.crownRot += 2; Snd.tick(0.08); }, 60); };
+    const start = (e) => { e.preventDefault(); Snd.ensure(); clearInterval(hold); hold = setInterval(() => { CaseBack.wind(0.012); Watch.crownRot += 2; Snd.ratchet(0.4); if (Math.random() < 0.3) Haptics.tap('tick'); }, 60); };
     const stop = () => clearInterval(hold);
     w.addEventListener('pointerdown', start); ['pointerup', 'pointerleave', 'pointercancel'].forEach(ev => w.addEventListener(ev, stop));
   },
