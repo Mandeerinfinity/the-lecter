@@ -188,10 +188,12 @@ const Moths = {
     while (this.list.length < n) this.list.push({ x: Math.random() * W, y: Math.random() * H, vx: rand(-1, 1), vy: rand(-1, 1), ph: Math.random() * 12, s: rand(0.55, 1.05), orbit: rand(0.95, 1.65), dir: Math.random() < 0.5 ? 1 : -1, rest: 0, seed: Math.random() * 100 });
     this.list.length = n; if (!n) this.ctx.clearRect(0, 0, this.cv.width, this.cv.height);
   },
+  storm(sec = 8) { const n = innerWidth < 900 ? 60 : 110; this.stormUntil = performance.now() + sec * 1000; this.setCount(Math.max(this.list.length, n)); const W = innerWidth, H = innerHeight; this.list.forEach(m => { m.vx = rand(-6, 6); m.vy = rand(-6, 6); }); document.body.classList.add('storm'); setTimeout(() => document.body.classList.remove('storm'), sec * 1000); },
   scatter(x, y) { this.list.forEach(m => { const dx = m.x - x, dy = m.y - y, d = Math.hypot(dx, dy) || 1; if (d < 260) { m.vx += dx / d * 9; m.vy += dy / d * 9; } }); },
   update(dt, t) {
     const L = this.list; if (!L.length) { this.tip.classList.remove('show'); return; }
-    const c = this.ctx, st = $('#stage-watch').getBoundingClientRect(), wx = st.left + st.width / 2, wy = st.top + st.height / 2, wr = st.width * 0.36;
+    if (!this._st || t - this._stt > 0.5 || t < this._stt) { this._st = $('#stage-watch').getBoundingClientRect(); this._stt = t; } const c = this.ctx, st = this._st, storm = this.stormUntil && performance.now() < this.stormUntil, wx = st.left + st.width / 2, wy = st.top + st.height / 2, wr = st.width * (storm ? 0.5 : 0.36);
+    if (this.stormUntil && !storm) { this.stormUntil = 0; this.setCount(Settings.moths && !Settings.reducedMotion ? (App.lowPower ? Math.min(10, Settings.mothCount) : Settings.mothCount) : 0); if (!this.list.length) return; }
     const mo = this.mouse, speed = Math.hypot(mo.vx, mo.vy); let hov = null, hd = 22; const small = innerWidth < 900, sc = small ? 0.62 : 1;
     if (!this._pr || t - this._prt > 0.5) { const pe = $('#panel'); this._pr = !small && pe ? pe.getBoundingClientRect() : null; this._prt = t; } const pr = this._pr;
     c.setTransform(this.d, 0, 0, this.d, 0, 0); c.clearRect(0, 0, innerWidth, innerHeight);
@@ -207,12 +209,13 @@ const Moths = {
         m.vx += Math.sin(t * 1.3 + m.seed) * 0.05; m.vy += Math.cos(t * 1.1 + m.seed * 2) * 0.05;
         if (dm < 120) { const f = (120 - dm) / 120 * (0.5 + speed * 1.8); m.vx += dx / (dm || 1) * f; m.vy += dy / (dm || 1) * f; }
         if (pr && m.x > pr.left - 30 && m.y > pr.top - 30 && m.y < pr.bottom + 30) { m.vx -= 0.35; }
-        const sp = Math.hypot(m.vx, m.vy), max = 3.4; if (sp > max) { m.vx *= max / sp; m.vy *= max / sp; }
+        if (storm) { m.vx += (Math.random() - 0.5) * 1.2; m.vy += (Math.random() - 0.5) * 1.2; m.vx += (-oy / od) * 0.08 * m.dir; m.vy += (ox / od) * 0.08 * m.dir; }
+        const sp = Math.hypot(m.vx, m.vy), max = storm ? 7.5 : 3.4; if (sp > max) { m.vx *= max / sp; m.vy *= max / sp; }
         m.vx *= 0.985; m.vy *= 0.985; m.x += m.vx * 60 * dt; m.y += m.vy * 60 * dt; m.ph += dt * (14 + sp * 3);
       }
       const ang = Math.atan2(m.vy, m.vx) + Math.PI / 2, fr = this.frames[Math.floor(m.ph) % this.frames.length], size = 46 * m.s * sc;
       c.save(); c.translate(m.x, m.y); c.rotate(ang); c.globalAlpha = 0.92;
-      c.shadowColor = 'rgba(0,0,0,.6)'; c.shadowBlur = 8; c.shadowOffsetY = 6;
+      if (!App.lowPower && L.length < 70) { c.shadowColor = 'rgba(0,0,0,.6)'; c.shadowBlur = 8; c.shadowOffsetY = 6; }
       c.drawImage(fr, -size / 2, -size / 2, size, size); c.restore();
     }
     this.hover = hov;

@@ -40,7 +40,7 @@ const Sketch = {
     const c = document.createElement('canvas'); c.width = this.ink.width; c.height = this.ink.height; const x = c.getContext('2d');
     x.drawImage(this.paper, 0, 0); x.drawImage(this.ink, 0, 0);
     x.fillStyle = 'rgba(40,32,24,.55)'; x.font = `${16 * this.d}px "Pinyon Script", cursive`; x.textAlign = 'right'; x.fillText('after the Florentine manner · Cinco Corporation', c.width - 14 * this.d, c.height - 12 * this.d);
-    downloadDataURL(c.toDataURL('image/png'), 'charcoal-sketch.png'); toast('Sketch saved as PNG');
+    downloadDataURL(c.toDataURL('image/png'), 'charcoal-sketch.png'); toast('Sketch saved as PNG'); Bus.emit('ach', 'sketch');
   }
 };
 MODES.push({
@@ -59,7 +59,7 @@ MODES.push({
     $('#sk-clear', el).onclick = () => Sketch.clear(); $('#sk-save', el).onclick = () => Sketch.save();
     $('#sk-dial', el).onchange = (e) => { DialInk.setOn(e.target.checked); toast(e.target.checked ? 'Draw on the crystal. Untick the box to go back to normal.' : 'Dial drawing off'); };
     $('#sk-dclear', el).onclick = () => DialInk.clear();
-    $('#sk-dsave', el).onclick = () => { const c = Watch.snapshot(1000); c.getContext('2d').drawImage(DialInk.cv, 0, 0, 1000, 1000); downloadDataURL(c.toDataURL('image/png'), 'lecter-dial-sketch.png'); toast('Dial saved as PNG'); };
+    $('#sk-dsave', el).onclick = () => { const c = Watch.snapshot(1000); c.getContext('2d').drawImage(DialInk.cv, 0, 0, 1000, 1000); downloadDataURL(c.toDataURL('image/png'), 'lecter-dial-sketch.png'); toast('Dial saved as PNG'); Bus.emit('ach', 'sketch'); };
   },
   show() { requestAnimationFrame(() => Sketch.resize()); },
   hide() { DialInk.setOn(false); const c = $('#sk-dial'); if (c) c.checked = false; }
@@ -113,17 +113,24 @@ MODES.push({
 
 /* ——— XIII. Dials & themes ——— */
 MODES.push({
-  id: 'themes', name: 'Quadranti', label: 'Dials', kicker: 'Atelier', icon: 'themes', sub: 'Five dial variants, each with its own case metal. Press T to cycle through them.',
+  id: 'themes', name: 'Quadranti', label: 'Dials', kicker: 'Atelier', icon: 'themes', sub: 'Five dial variants, each with its own case metal, and one that stays hidden until it is earned. Press T to cycle.',
   build(el) {
-    el.innerHTML = `<div class="themes">${THEME_ORDER.map(id => { const t = THEMES[id], M = METALS[t.metal]; return `<button class="theme-card" data-t="${id}"><span class="sw" style="background:radial-gradient(circle at 35% 30%, ${t.dial[0]}, ${t.dial[1]} 70%); box-shadow: 0 0 0 4px ${M[1]}, 0 0 0 5px ${M[4]}, 0 6px 14px rgba(0,0,0,.5)"><i style="background:${t.accent}"></i></span><b>${t.name}</b><small>${t.blurb}</small></button>`; }).join('')}</div>
+    el.innerHTML = `<div class="themes" id="th-cards"></div>
       <label class="lbl">Seconds hand</label><div class="seg" id="th-sec"><button data-v="sweep">Eight-beat sweep</button><button data-v="tick">One-second tick</button><button data-v="chrono">Parked (chronograph only)</button></div>
-      <label class="chk"><input type="checkbox" id="th-light"> Light follows the cursor, or the tilt of your phone</label>`;
-    $$('.theme-card', el).forEach(b => b.onclick = () => App.setTheme(b.dataset.t));
+      <label class="chk"><input type="checkbox" id="th-light"> Light follows the cursor, or the tilt of your phone</label><br><label class="chk" style="margin-top:8px"><input type="checkbox" id="th-glow"> Lume glows in the dark dials</label>
+      <p class="fine">To change the case metal or strap, visit <em>Su Misura</em> on ring II. For a tourbillon in place of the moon, see <em>Turbine</em>.</p>`;
+    $('#th-glow', el).checked = Settings.lumeGlow !== false; $('#th-glow', el).onchange = (e) => setSetting('lumeGlow', e.target.checked);
+    this.el = el; this.renderCards();
     $$('#th-sec button', el).forEach(b => b.onclick = () => { setSetting('seconds', b.dataset.v); this.mark(); });
     $('#th-light', el).checked = Settings.lightFollow; $('#th-light', el).onchange = (e) => setSetting('lightFollow', e.target.checked);
     Bus.on('setting:theme', () => this.mark()); this.mark();
   },
-  mark() { $$('.theme-card').forEach(b => b.classList.toggle('on', b.dataset.t === Settings.theme)); $$('#th-sec button').forEach(b => b.classList.toggle('on', b.dataset.v === Settings.seconds)); }
+  renderCards() {
+    const box = $('#th-cards'); if (!box) return;
+    box.innerHTML = themeOrder().map(id => { const t = THEMES[id], M = METALS[t.metal]; return `<button class="theme-card${t.secret ? ' secret' : ''}" data-t="${id}" aria-pressed="false"><span class="sw" style="background:radial-gradient(circle at 35% 30%, ${t.dial[0]}, ${t.dial[1]} 70%); box-shadow: 0 0 0 4px ${M[1]}, 0 0 0 5px ${M[4]}, 0 6px 14px rgba(0,0,0,.5)"><i style="background:${t.accent}"></i></span><b>${t.name}</b><small>${t.blurb}</small></button>`; }).join('');
+    $$('.theme-card', box).forEach(b => b.onclick = () => App.setTheme(b.dataset.t)); this.mark();
+  },
+  mark() { $$('.theme-card').forEach(b => { b.classList.toggle('on', b.dataset.t === Settings.theme); b.setAttribute('aria-pressed', b.dataset.t === Settings.theme); }); $$('#th-sec button').forEach(b => b.classList.toggle('on', b.dataset.v === Settings.seconds)); }
 });
 
 /* ——— XIV. Dossier ——— */
@@ -163,15 +170,18 @@ MODES.push({
   build(el) {
     const tg = (k, l) => `<label class="row-set"><span>${l}</span><label class="switch"><input type="checkbox" data-k="${k}" ${Settings[k] ? 'checked' : ''}><span></span></label></label>`;
     el.innerHTML = `<div class="set-list">${tg('h24', '24-hour time')}${tg('moths', "Death's-head moths")}<label class="row-set"><span>Moth count</span><input type="range" id="st-mc" min="4" max="60" value="${Settings.mothCount}"></label>
-      ${tg('fog', 'Breath on the glass')}${tg('tick', 'Audible ticking')}${tg('hourlyChime', 'Hourly harpsichord chime')}${tg('lightFollow', 'Light follows cursor / tilt')}${tg('nvNoise', 'Night-vision grain')}${tg('reducedMotion', 'Reduced motion')}
+      ${tg('fog', 'Breath on the glass')}${tg('tick', 'Audible ticking')}${tg('hourlyChime', 'Hourly harpsichord chime')}${tg('lightFollow', 'Light follows cursor / tilt')}${tg('nvNoise', 'Night-vision grain')}${tg('lumeGlow', 'Lume glow in dark dials')}${tg('reducedMotion', 'Reduced motion')}
+      ${tg('voice', 'Voice: speak the time (S) and remarks aloud')}${tg('voiceQuid', 'Voice also reads Quid pro quo')}
       <label class="row-set"><span>Master volume</span><input type="range" id="st-vol" min="0" max="1" step="0.01" value="${Settings.volume}"></label></div>
-      <div class="btn-row"><button class="btn" id="st-keys">Keyboard shortcuts</button><button class="btn" id="st-intro">Replay the introduction</button><button class="btn" id="st-fs">Fullscreen</button><button class="btn ghost" id="st-reset">Reset everything</button></div>
-      <p class="fine">On phones and tablets: swipe left or right across the watch to change complication, long-press the crystal to breathe on it, and tilt the device to move the light.</p>`;
+      <div class="btn-row"><button class="btn" id="st-keys">Keyboard shortcuts</button><button class="btn" id="st-intro">Replay the introduction</button><button class="btn" id="st-voice">Test the voice</button><button class="btn" id="st-fs">Fullscreen</button><button class="btn ghost" id="st-reset">Reset everything</button></div>
+      <p class="fine" id="st-vname"></p><p class="fine">On phones and tablets: swipe left or right across the watch to change complication, long-press the crystal to breathe on it, and tilt the device to move the light.</p>`;
     $$('input[data-k]', el).forEach(c => c.onchange = () => { setSetting(c.dataset.k, c.checked); if (c.dataset.k === 'tick' || c.dataset.k === 'hourlyChime') Snd.ensure(); });
     $('#st-mc', el).oninput = (e) => setSetting('mothCount', +e.target.value);
     $('#st-vol', el).oninput = (e) => { setSetting('volume', +e.target.value); Snd.setVolume(+e.target.value); };
+    $('#st-voice', el).onclick = () => { Voice.pick(); const ok = Voice.speak('Good evening. ' + Voice.phrase(), true); toast(ok ? 'Voice: ' + Voice.name() : 'Speech is not available in this browser'); };
     $('#st-keys', el).onclick = () => App.help(); $('#st-intro', el).onclick = () => App.intro(true); $('#st-fs', el).onclick = () => App.fullscreen();
     $('#st-reset', el).onclick = () => { if (confirm('Reset all settings, alarms, laps and timers stored by this watch?')) { Object.keys(localStorage).filter(k => k.startsWith('lecter.')).forEach(k => localStorage.removeItem(k)); location.reload(); } };
     Bus.on('setting', (k, v) => { const c = $(`input[data-k="${k}"]`, el); if (c) c.checked = !!v; });
-  }
+  },
+  show() { const p = $('#st-vname'); if (p) p.textContent = Voice.ok ? 'Voice available: ' + Voice.name() + '. A British voice is used when your system has one.' : 'This browser has no speech synthesis, so the voice options only show the words.'; }
 });

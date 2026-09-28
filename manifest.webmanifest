@@ -1,0 +1,19 @@
+{
+  "name": "The Lecter · Cinco Corporation",
+  "short_name": "The Lecter",
+  "description": "Cinco Corporation presents The Lecter, “Il Dottore” Calibre C-1991: a hand-rendered luxury chronograph with complications, a harpsichord and considerable manners.",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0c0b0a",
+  "theme_color": "#0c0b0a",
+  "categories": ["lifestyle", "entertainment", "utilities"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}

@@ -104,7 +104,7 @@ MODES.push({
       <div class="card-wrap"><canvas id="menu-card"></canvas></div>`;
     const redraw = () => { MenuCard.occasion = $('#mn-occ').value; MenuCard.season = $('#mn-sea').value; MenuCard.guests = clamp(+$('#mn-g').value || 6, 2, 24); MenuCard.draw($('#menu-card')); };
     ['mn-occ', 'mn-sea', 'mn-g'].forEach(id => $('#' + id, el).onchange = redraw);
-    $('#mn-new', el).onclick = () => { MenuCard.seed = (MenuCard.seed * 16807 + 11) % 2147483647; redraw(); Snd.ensure(); Snd.pluck(79, 0, 0.4, 0, Snd.sfx); Snd.pluck(84, Snd.ctx.currentTime + 0.08, 0.4, 0, Snd.sfx); };
+    $('#mn-new', el).onclick = () => { const mc = Store.get('menus', 0) + 1; Store.set('menus', mc); if (mc >= 5) Bus.emit('ach', 'host'); MenuCard.seed = (MenuCard.seed * 16807 + 11) % 2147483647; redraw(); Snd.ensure(); Snd.pluck(79, 0, 0.4, 0, Snd.sfx); Snd.pluck(84, Snd.ctx.currentTime + 0.08, 0.4, 0, Snd.sfx); };
     $('#mn-save', el).onclick = () => { const c = document.createElement('canvas'); MenuCard.draw(c, 1.5); downloadDataURL(c.toDataURL('image/png'), 'menu-du-jour.png'); toast('Menu card saved'); };
     this.redraw = redraw;
   },

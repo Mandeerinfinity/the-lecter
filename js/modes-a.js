@@ -43,6 +43,8 @@ MODES.push({
         <button class="btn" id="t-h24">12 / 24 h</button>
         <button class="btn" data-act="breathe">Breathe on the glass</button>
         <button class="btn" data-act="flip">Turn it over</button>
+        <button class="btn" data-act="repeater">Strike the time</button>
+        <button class="btn" data-act="speak">Speak it</button>
       </div>
       <p class="fine">Reading the dial: <em>9 o'clock</em>, running seconds · <em>3 o'clock</em>, chronograph minutes · <em>6 o'clock</em>, moon phase with pointer date.
       The seconds hand beats eight times a second, as a 28,800 vibration movement should. Maker: <span class="sc">Cinco Corporation</span>.</p>`;
@@ -69,7 +71,7 @@ const Chrono = {
   elapsed() { return this.s.acc + (this.s.running ? Date.now() - this.s.start : 0); },
   save() { Store.set('chrono', this.s); },
   toggle() { pressPusher('top'); if (this.s.running) { this.s.acc = this.elapsed(); this.s.running = false; } else { this.s.start = Date.now(); this.s.running = true; } this.save(); this.render(); },
-  lapOrReset() { pressPusher('bot'); if (this.s.running) { const e = this.elapsed(); const prev = this.s.laps.length ? this.s.laps[0].t : 0; this.s.laps.unshift({ t: e, d: e - prev }); } else { this.s = { running: false, start: 0, acc: 0, laps: [] }; } this.save(); this.render(); },
+  lapOrReset() { pressPusher('bot'); if (this.s.running) { const e = this.elapsed(); const prev = this.s.laps.length ? this.s.laps[0].t : 0; this.s.laps.unshift({ t: e, d: e - prev }); if (Math.abs(e - prev - 10000) <= 50) Bus.emit('ach', 'lap10'); } else { this.s = { running: false, start: 0, acc: 0, laps: [] }; } this.save(); this.render(); },
   render() {
     const box = $('#c-laps'); if (!box) return; const L = this.s.laps;
     $('#c-start').textContent = this.s.running ? 'Stop' : (this.elapsed() ? 'Resume' : 'Start');

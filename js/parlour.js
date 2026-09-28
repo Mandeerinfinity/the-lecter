@@ -41,6 +41,7 @@ const Quid = {
   say(text, who = 'w') {
     const log = $('#qp-log'); const li = el('div', { class: 'msg ' + who }); log.appendChild(li);
     if (who === 'u') { li.textContent = text; log.scrollTop = log.scrollHeight; return Promise.resolve(); }
+    if (Settings.voice && Settings.voiceQuid) Voice.speak(text);
     return new Promise(res => { let i = 0; const step = () => { li.textContent = text.slice(0, ++i); log.scrollTop = log.scrollHeight; if (i < text.length) setTimeout(step, Settings.reducedMotion ? 0 : 16 + Math.random() * 18); else res(); }; step(); });
   },
   async start() { $('#qp-log').innerHTML = ''; this.qi = Math.floor(Math.random() * this.Q.length); await this.say('Good evening. We shall trade, you and I: an answer for an answer. I ask first.'); this.ask(); },
@@ -58,7 +59,7 @@ const Quid = {
     t = t.trim(); if (!t || this.busy) return; this.busy = true; this.say(t, 'u'); $('#qp-in').value = '';
     await new Promise(r => setTimeout(r, 450));
     if (this.phase === 'ask') { await this.say(this.respond(t)); await this.say('Quid pro quo. Now you may ask me something, and I will answer truthfully.'); this.phase = 'yours'; this.hint('Ask the watch a question…'); }
-    else { await this.say(this.answer(t)); this.qi++; this.n++; await new Promise(r => setTimeout(r, 300)); await this.ask(); }
+    else { await this.say(this.answer(t)); this.qi++; this.n++; if (this.n >= 5) Bus.emit('ach', 'quid'); await new Promise(r => setTimeout(r, 300)); await this.ask(); }
     this.busy = false;
   }
 };
@@ -99,7 +100,7 @@ const Poly = {
   },
   finish() {
     this.on = false; const score = Math.round(this.results.reduce((a, v) => a + (v === 'T' ? 1 : v === 'I' ? 0.5 : 0), 0) / 5 * 100);
-    $('#pg-q').textContent = `Session concluded. Candour index: ${score}%.`;
+    $('#pg-q').textContent = `Session concluded. Candour index: ${score}%.`; if (score >= 100) Bus.emit('ach', 'candour');
     $('#pg-verdict').innerHTML = `<em>${score >= 80 ? 'An honest subject. I find that almost suspicious.' : score >= 50 ? 'A mostly honest subject, with a talent for small evasions.' : 'You lie with enthusiasm. Practise the calm; the rest will follow.'}</em>`;
     $('#pg-start').textContent = 'Begin again';
   },

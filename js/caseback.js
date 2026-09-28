@@ -11,7 +11,7 @@ const CaseBack = {
   },
   mk() { const c = document.createElement('canvas'); c.width = this.cv.width; c.height = this.cv.height; const x = c.getContext('2d'); x.scale(this.dpr, this.dpr); x.translate(this.W / 2, this.W / 2); return [c, x]; },
   build() {
-    const M = METALS[Watch.theme.metal], R = this.R, w = this.w;
+    const M = Watch.M(), R = this.R, w = this.w, E = CaseBack.engraving();
     // —— case back ring ——
     const [c1, x] = this.mk();
     x.save(); x.shadowColor = 'rgba(0,0,0,.75)'; x.shadowBlur = R * 0.3; x.shadowOffsetY = R * 0.1; x.beginPath(); x.arc(0, 0, R * 0.99, 0, TAU); x.fillStyle = '#000'; x.fill(); x.restore();
@@ -30,9 +30,12 @@ const CaseBack = {
     const mid = (ro + ri) / 2;
     eng(() => {
       x.font = `700 ${R * 0.058}px Cinzel, serif`; arcText(x, 'CINCO CORPORATION', 0, 0, mid, 0, R * 0.02);
-      x.font = `${R * 0.07}px "Pinyon Script", cursive`; arcText(x, 'for a mind of refined taste', 0, 0, mid - R * 0.005, Math.PI, R * 0.002, true);
+      const ef = CaseBack.engraveFont(E.font, R), txt = E.font === 'roman' ? E.text.toUpperCase() : E.text;
+      x.font = ef.font; let sp = ef.sp; while (sp > -R * 0.004 && [...txt].reduce((s2, ch) => s2 + x.measureText(ch).width + sp, 0) > mid * Math.PI * 0.8) sp -= R * 0.002;
+      let fs = parseFloat(ef.font.match(/([\d.]+)px/)[1]); while ([...txt].reduce((s2, ch) => s2 + x.measureText(ch).width + sp, 0) > mid * Math.PI * 0.86 && fs > R * 0.03) { fs *= 0.94; x.font = ef.font.replace(/[\d.]+px/, fs + 'px'); }
+      arcText(x, txt, 0, 0, mid - R * (E.font === 'script' ? 0.005 : 0), Math.PI, sp, true);
       x.font = `600 ${R * 0.03}px Cinzel, serif`; arcText(x, 'CALIBRE C-1991 · 42 RUBIS', 0, 0, mid, -Math.PI / 2, R * 0.01);
-      x.font = `600 ${R * 0.03}px Cinzel, serif`; arcText(x, 'Nº 0417 / 1000 · 30 M', 0, 0, mid, Math.PI / 2, R * 0.01);
+      x.font = `600 ${R * 0.03}px Cinzel, serif`; arcText(x, E.date ? E.date : 'Nº 0417 / 1000 · 30 M', 0, 0, mid, Math.PI / 2, R * 0.01);
       for (let k = 0; k < 4; k++) star(x, Math.sin(k * TAU / 4 + TAU / 8) * mid, -Math.cos(k * TAU / 4 + TAU / 8) * mid, R * 0.02, x.fillStyle);
     });
     x.beginPath(); x.arc(0, 0, ri, 0, TAU); x.lineWidth = R * 0.02; x.strokeStyle = metalConic(x, 0, 0, [M[0], M[2], M[3], M[4]], 0); x.stroke();
@@ -102,7 +105,7 @@ const CaseBack = {
     };
     const brass = ['#ffe6a8', '#b2872f'];
     this.sprites = { barrel: gearSprite(G.barrel[2], 72, 5, brass), center: gearSprite(G.center[2], 64, 4, brass), third: gearSprite(G.third[2], 56, 4, brass), fourth: gearSprite(G.fourth[2], 48, 4, brass), escape: this.escSprite(G.escape[2]) };
-    this.layers.built = Watch.theme.metal;
+    this.layers.built = this.key();
   },
   escSprite(rad) {
     const s = Math.ceil(rad * 2.3 * this.dpr), c = document.createElement('canvas'); c.width = c.height = s; const g = c.getContext('2d'); g.scale(this.dpr, this.dpr); g.translate(s / 2 / this.dpr, s / 2 / this.dpr);
@@ -111,9 +114,12 @@ const CaseBack = {
     g.save(); g.globalCompositeOperation = 'destination-out'; for (let k = 0; k < 4; k++) { const a = k / 4 * TAU; g.beginPath(); g.arc(0, 0, rad * 0.55, a + 0.25, a + TAU / 4 - 0.25); g.arc(0, 0, rad * 0.2, a + TAU / 4 - 0.5, a + 0.5, true); g.closePath(); g.fill(); } g.restore();
     return c;
   },
-  wind(amount) { this.power = clamp(this.power + amount, 0, 1); Store.set('power', this.power); },
+  key() { const E = this.engraving(); return Watch.metal() + '|' + E.text + '|' + E.font + '|' + E.date; },
+  engraving() { const e = Settings.engrave || {}; return { text: (e.text || '').trim() || 'for a mind of refined taste', font: e.font || 'script', date: (e.date || '').trim() }; },
+  engraveFont(f, R) { return f === 'roman' ? { font: `600 ${R * 0.045}px Cinzel, serif`, sp: R * 0.014 } : f === 'type' ? { font: `${R * 0.05}px "Special Elite", monospace`, sp: R * 0.004 } : { font: `${R * 0.07}px "Pinyon Script", cursive`, sp: R * 0.002 }; },
+  wind(amount) { const was = this.power; this.power = clamp(this.power + amount, 0, 1); if (!this._ps || performance.now() - this._ps > 1000) { Store.set('power', this.power); this._ps = performance.now(); } if (this.power >= 0.999 && was < 0.999) Bus.emit('ach', 'wound'); },
   render(now) {
-    if (!this.layers.ring || this.layers.built !== Watch.theme.metal) this.build();
+    if (!this.layers.ring || this.layers.built !== this.key()) this.build();
     const ctx = this.ctx, w = this.w, G = this.G, S = this.sprites;
     const real = performance.now() / 1000, dt = Math.min(0.05, this.lastReal ? real - this.lastReal : 0.016); this.lastReal = real;
     this.simT += dt * this.speed;
